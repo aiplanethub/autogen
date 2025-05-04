@@ -1,7 +1,7 @@
 FROM python:3.10-slim
 WORKDIR /code
 
-RUN pip install -U gunicorn autogenstudio
+RUN pip install -U gunicorn autogenstudio docker
 
 # Create a non-root user
 RUN useradd -m -u 1000 user
