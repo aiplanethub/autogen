@@ -8,6 +8,7 @@ from autogen_core import ComponentModel
 from autogen_core.models import UserMessage
 from autogen_ext.models.openai import OpenAIChatCompletionClient
 from pydantic import BaseModel, ConfigDict, SecretStr
+from autogen_agentchat.conditions import _terminations
 
 
 class MessageConfig(BaseModel):
@@ -80,7 +81,10 @@ class GalleryConfig(BaseModel):
     components: GalleryComponents
 
     model_config = ConfigDict(
-        json_encoders={datetime: lambda v: v.isoformat(), SecretStr: lambda v: v.get_secret_value()}
+        json_encoders={
+            datetime: lambda v: v.isoformat(),
+            SecretStr: lambda v: v.get_secret_value(),
+        }
     )
 
 
@@ -119,3 +123,88 @@ class SocketMessage(BaseModel):
     connection_id: str
     data: Dict[str, Any]
     type: str
+
+
+# Architect agent specific models
+class FunctionToolConfig(BaseModel):
+    source_code: str
+    name: str
+    description: str
+    global_imports: List[str]
+    has_cancellation_support: bool
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class FunctionTool(BaseModel):
+    provider: Literal["autogen_core.tools.FunctionTool"]
+    component_type: Literal["tool"]
+    version: int
+    component_version: int
+    description: str
+    label: str
+    config: FunctionToolConfig
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ModelClient(BaseModel):
+    provider: str
+    component_type: Literal["model"]
+    version: int
+    component_version: int
+    description: str
+    label: str
+    config: Any
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ModelContext(BaseModel):
+    provider: str
+    component_type: Literal["chat_completion_context"]
+    version: int
+    component_version: int
+    description: str
+    label: str
+    config: Any
+
+    model_config = ConfigDict(extra="forbid")
+
+
+# Agent models
+class AssistantAgentConfig(BaseModel):
+    name: str
+    model_client: ModelClient
+    tools: List[FunctionTool] = []
+    model_context: ModelContext
+    description: str
+    system_message: str
+    model_client_stream: bool
+    reflect_on_tool_use: bool
+    tool_call_summary_format: str
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class AgentConfig(BaseModel):
+    provider: str
+    component_type: Literal["agent"]
+    version: int
+    component_version: int
+    description: str
+    label: str
+    config: AssistantAgentConfig
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SelectorGroupChatConfig(BaseModel):
+    participants: List[AgentConfig]
+    model_client: ModelClient
+    termination_condition: Any[_terminations]
+    selector_prompt: str
+    allow_repeated_speaker: bool
+    max_selector_attempts: int
+
+    model_config = ConfigDict(extra="forbid")
