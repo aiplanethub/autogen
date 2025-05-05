@@ -2,6 +2,7 @@ from typing import Dict, List, Optional, Literal
 from pydantic import BaseModel, Field, ConfigDict
 from autogen_agentchat.agents import AssistantAgent
 
+
 # ——————————————————————————————————————————————
 # 1) AssistantAgentConfig
 # ——————————————————————————————————————————————
@@ -22,27 +23,39 @@ class AssistantAgentConfig(BaseModel):
     output_content_type_format: Optional[str] = None
     metadata: Optional[Dict[str, str]] = None
 
-    model_config = ConfigDict(
-        extra="forbid"
-    )
+    model_config = ConfigDict(extra="forbid")
+
 
 # ——————————————————————————————————————————————
 # 2) GroupChatConfig - Single class with group_chat field as discriminator
 # ——————————————————————————————————————————————
 class GroupChatConfig(BaseModel):
     group_chat: str = Field(..., description="Type of group chat")
-    participants: List[str] = Field(..., description="List of agent names participating in the group chat.")
-    termination_condition: Optional[str] = Field(None, description="Condition under which the group chat terminates.")
-    max_turns: Optional[int] = Field(None, description="Maximum number of turns allowed in the group chat.")
-    custom_message_types: Optional[List[str]] = Field(None, description="List of custom message types allowed in the group chat.")
-    emit_team_events: Optional[bool] = Field(None, description="Whether the group chat emits team-level events.")
-    # Optional fields for specific group chat types
-    handoff_message_types: Optional[List[str]] = Field(None, description="List of message types used for handoffs (Swarm only).")
-    task_domains: Optional[List[str]] = Field(None, description="List of task domains or categories (MagenticOne only).")
-
-    model_config = ConfigDict(
-        extra="forbid"
+    participants: List[str] = Field(
+        ..., description="List of agent names participating in the group chat."
     )
+    termination_condition: Optional[str] = Field(
+        None, description="Condition under which the group chat terminates."
+    )
+    max_turns: Optional[int] = Field(
+        None, description="Maximum number of turns allowed in the group chat."
+    )
+    custom_message_types: Optional[List[str]] = Field(
+        None, description="List of custom message types allowed in the group chat."
+    )
+    emit_team_events: Optional[bool] = Field(
+        None, description="Whether the group chat emits team-level events."
+    )
+    # Optional fields for specific group chat types
+    handoff_message_types: Optional[List[str]] = Field(
+        None, description="List of message types used for handoffs (Swarm only)."
+    )
+    task_domains: Optional[List[str]] = Field(
+        None, description="List of task domains or categories (MagenticOne only)."
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
 
 # ——————————————————————————————————————————————
 # 3) ArchitectConfig - Using simplified structure
@@ -50,12 +63,14 @@ class GroupChatConfig(BaseModel):
 class ArchitectConfig(BaseModel):
     group_chat: GroupChatConfig
     agents: List[AssistantAgentConfig]
-    inputs: List[str] = Field(..., description="List of input types (e.g., 'file', 'prompt', 'URL', 'JSON')")
-    outputs: List[str] = Field(..., description="List of output types (e.g., 'file', 'prompt', 'URL', 'JSON')")
-
-    model_config = ConfigDict(
-        extra="forbid"
+    inputs: List[str] = Field(
+        ..., description="List of input types (e.g., 'file', 'prompt', 'URL', 'JSON')"
     )
+    outputs: List[str] = Field(
+        ..., description="List of output types (e.g., 'file', 'prompt', 'URL', 'JSON')"
+    )
+
+    model_config = ConfigDict(extra="forbid")
 
 
 SYSTEM_MESSAGE = """
@@ -79,14 +94,9 @@ SYSTEM_MESSAGE = """
     - "inputs": List of input types (choose from: "file", "prompt", "URL", "JSON")
     - "outputs": List of output types (choose from: "file", "prompt", "URL", "JSON")
 
-    For an RFP (Request for Proposal) system, you should include at minimum:
-    - A group chat with participants for handling different aspects of the RFP process
-    - Agents for file handling, analysis, and output storage
-    - Input types (file and prompt at minimum)
-    - Output types (file at minimum)
-
     Provide only the JSON object that matches this schema without additional text.
     """
+
 
 def architect_agent(model_client, tools: list = None, memory: list = None):
 
