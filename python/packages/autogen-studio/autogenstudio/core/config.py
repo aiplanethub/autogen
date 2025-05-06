@@ -11,6 +11,7 @@ from pydantic import (
     Field,
     field_validator,
 )
+import os
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -65,11 +66,13 @@ class Settings(BaseSettings):
 
     # Weaviate settings
     WEAVIATE_API_KEY: str = ""
-    WEAVIATE_URL: str = ""
+    WEAVIATE_HTTP_HOST: str = ""
+    WEAVIATE_GRPC_HOST: str = ""
+    WEAVIATE_HTTP_PORT: int = 443
 
     # Pydantic v2 uses model_config instead of Config class
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=os.path.join(os.path.dirname(__file__), ".env"),
         env_file_encoding="utf-8",
         case_sensitive=True,
         extra="ignore",

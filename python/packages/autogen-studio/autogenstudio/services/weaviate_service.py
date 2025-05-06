@@ -28,13 +28,14 @@ class WeaviateService:
         self.settings = get_settings()
 
     async def __aenter__(self):
-        if not self.settings.WEAVIATE_URL:
-            raise ValueError("WEAVIATE_URL is not configured")
-        if not self.settings.WEAVIATE_API_KEY:
-            raise ValueError("WEAVIATE_API_KEY is missing")
         weaviate_api_key = self.settings.WEAVIATE_API_KEY
-        self.client = weaviate.connect_to_weaviate_cloud(
-            cluster_url=self.settings.WEAVIATE_URL,
+        self.client = weaviate.connect_to_custom(
+            http_host=self.settings.WEAVIATE_HTTP_HOST,
+            http_port=443,
+            http_secure=True,
+            grpc_host=self.settings.WEAVIATE_GRPC_HOST,
+            grpc_port=443,
+            grpc_secure=True,
             auth_credentials=Auth.api_key(weaviate_api_key),
             headers={
                 "X-Azure-Api-Key": self.settings.AZURE_API_KEY,
