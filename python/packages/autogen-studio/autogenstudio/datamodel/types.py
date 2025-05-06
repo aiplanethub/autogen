@@ -202,7 +202,7 @@ class AgentConfig(BaseModel):
 class SelectorGroupChatConfig(BaseModel):
     participants: List[AgentConfig]
     model_client: ModelClient
-    termination_condition: Any[_terminations]
+    termination_condition: Any
     selector_prompt: str
     allow_repeated_speaker: bool
     max_selector_attempts: int

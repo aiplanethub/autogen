@@ -12,7 +12,7 @@ from fastapi import HTTPException, status
 from weaviate.classes.config import Configure
 from weaviate.classes.init import Auth
 
-from aiplatform.core.config import get_settings
+from autogenstudio.core.config import get_settings
 
 
 class WeaviateService:
@@ -28,8 +28,13 @@ class WeaviateService:
         self.settings = get_settings()
 
     async def __aenter__(self):
+        if not self.settings.WEAVIATE_URL:
+            raise ValueError("WEAVIATE_URL is not configured")
+        if not self.settings.WEAVIATE_API_KEY:
+            raise ValueError("WEAVIATE_API_KEY is missing")
         weaviate_api_key = self.settings.WEAVIATE_API_KEY
-        self.client = weaviate.connect_to_local(
+        self.client = weaviate.connect_to_weaviate_cloud(
+            cluster_url=self.settings.WEAVIATE_URL,
             auth_credentials=Auth.api_key(weaviate_api_key),
             headers={
                 "X-Azure-Api-Key": self.settings.AZURE_API_KEY,
