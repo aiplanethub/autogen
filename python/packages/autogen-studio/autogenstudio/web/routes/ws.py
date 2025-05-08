@@ -2,13 +2,14 @@
 import asyncio
 import json
 from datetime import datetime
+from typing import Optional
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from fastapi.websockets import WebSocketState
 from loguru import logger
 
-from ...datamodel import Run, RunStatus
-from ...utils.utils import construct_task
+from ...datamodel import Run, RunStatus, Settings, SettingsConfig
+from ...utils.utils import construct_task, update_team_config
 from ..auth.dependencies import get_ws_auth_manager
 from ..auth.wsauth import WebSocketAuthHandler
 from ..deps import get_db, get_websocket_manager
@@ -35,6 +36,18 @@ async def run_websocket(
             return
 
         run = run_response.data[0]
+        async def _get_settings(user_id: str) -> Optional[Settings]:
+            """Get user settings from database
+            Args:
+                user_id: User ID to retrieve settings for
+            Returns:
+                Optional[dict]: User settings if found, None otherwise
+            """
+            response = db.get(filters={"user_id": user_id}, model_class=Settings, return_json=False)
+            return response.data[0] if response.status and response.data else None
+
+        user_settings = await _get_settings(run.user_id)
+        env_vars = SettingsConfig(**user_settings.config).environment if user_settings else None  # type: ignore
 
         if run.status not in [RunStatus.CREATED, RunStatus.ACTIVE]:
             await websocket.close(code=4003, reason="Run not in valid state")
@@ -84,9 +97,10 @@ async def run_websocket(
                 if message.get("type") == "start":
                     # Handle start message
                     logger.info(f"Received start request for run {run_id}")
-                    task = construct_task(query=message.get("task"), files=message.get("files"))
+                    task = construct_task(query=message.get("task"), files=message.get("files"), env_vars=env_vars)
 
                     team_config = message.get("team_config")
+                    team_config = update_team_config(team_config, task)
                     if task and team_config:
                         # Start the stream in a separate task
                         asyncio.create_task(ws_manager.start_stream(run_id, task, team_config))
