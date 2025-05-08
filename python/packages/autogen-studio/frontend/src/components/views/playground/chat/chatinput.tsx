@@ -25,6 +25,7 @@ const ALLOWED_FILE_TYPES = [
   "image/png",
   "image/gif",
   "image/svg+xml",
+  "application/pdf",
 ];
 
 // Threshold for large text files (in characters)
@@ -253,7 +254,7 @@ export default function ChatInput({
           message: <span className="text-sm">Unsupported File Type</span>,
           description: (
             <span className="text-sm text-secondary">
-              Please upload only text (.txt) or images (.jpg, .png, .gif, .svg)
+              Please upload only text (.txt, .pdf) or images (.jpg, .png, .gif, .svg)
               files.
             </span>
           ),
