@@ -4,21 +4,21 @@ import useDebounce from "../../../utils/utils";
 import ListItem from "./ListItem";
 import { AgentAndToolProps } from "../../../types/aiworkflowcreation";
 
-const ToolsModalScreen: React.FC<{
+const AgentsModalScreen: React.FC<{
   selectedGallery: string;
   onChangeGallery: () => void;
-  tools: Array<AgentAndToolProps>;
-  onToggleTool: (id: string) => void;
-}> = ({ selectedGallery, onChangeGallery, tools, onToggleTool }) => {
+  agents: AgentAndToolProps[];
+  onToggleAgent: (id: string) => void;
+}> = ({ selectedGallery, onChangeGallery, agents, onToggleAgent }) => {
   const [searchTerm, setSearchTerm] = useState("");
   const debouncedSearchTerm = useDebounce(searchTerm, 200); // debounce by 200ms
 
-  // Filter galleries based on search term
-  const filteredTools = useMemo(() => {
-    return tools.filter((tool) =>
-      tool?.name?.toLowerCase().includes(debouncedSearchTerm.toLowerCase())
+  // Filter agents based on search term
+  const filteredAgents = useMemo(() => {
+    return agents.filter((agent) =>
+      agent?.name?.toLowerCase().includes(debouncedSearchTerm.toLowerCase())
     );
-  }, [tools, debouncedSearchTerm]);
+  }, [agents, debouncedSearchTerm]);
 
   return (
     <div className="max-w-3xl mx-auto py-6">
@@ -52,14 +52,14 @@ const ToolsModalScreen: React.FC<{
         />
       </div>
 
-      {/* Tools */}
+      {/* Agents */}
       <div className="max-h-[325px] h-full overflow-y-auto">
-        {filteredTools.map((tool) => (
+        {filteredAgents.map((agent) => (
           <ListItem
-            key={tool?.id || ""}
-            name={tool?.name || ""}
-            enabled={tool.enabled}
-            onToggle={() => onToggleTool(tool?.id || "")}
+            key={agent?.id || ""}
+            name={agent?.name || ""}
+            enabled={agent.enabled}
+            onToggle={() => onToggleAgent(agent?.id || "")}
           />
         ))}
       </div>
@@ -67,4 +67,4 @@ const ToolsModalScreen: React.FC<{
   );
 };
 
-export default ToolsModalScreen;
+export default AgentsModalScreen;

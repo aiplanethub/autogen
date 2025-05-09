@@ -1,42 +1,107 @@
-import React, { useState } from "react";
+import React, { useCallback, useContext, useEffect, useState } from "react";
 import { Textarea, Button } from "@headlessui/react";
 import Modal from "./Modal";
 import GalleryModalScreen from "./GalleryModalScreen";
 import ToolsModalScreen from "./options/ToolsModalScreen";
 import Icon from "../../Icon";
-
-type GalleryType = {
-  id: string;
-  name: string;
-};
+import AgentsModalScreen from "./options/AgentsModalScreen";
+import { message } from "antd";
+import { IGalleryProps, ModalScreens } from "../../types/aiworkflowcreation";
+import { appContext } from "../../../hooks/provider";
+import { galleryAPI } from "../gallery/api";
 
 const TaskRequirementInput = () => {
+  const [messageApi, contextHolder] = message.useMessage();
+  const [isLoading, setIsLoading] = useState(false);
+  const [galleries, setGalleries] = useState<IGalleryProps[]>([]);
   const [taskRequirement, setTaskRequirement] = useState("");
-  const [modalScreen, setModalScreen] = useState<
-    "gallery" | "tools" | "agents"
-  >("gallery");
+  const [modalScreen, setModalScreen] = useState<ModalScreens>("gallery");
   const [isOpen, setIsOpen] = useState(false);
-  const [selectedGallery, setSelectedGallery] = useState<GalleryType | null>(
+  const [selectedGallery, setSelectedGallery] = useState<IGalleryProps | null>(
     null
   );
+  const { user } = useContext(appContext);
+  const fetchGalleries = useCallback(async () => {
+    if (!user?.id) return;
+    try {
+      setIsLoading(true);
+      const response = await galleryAPI.listGalleries(user.id);
+      const data = response.map((item) => ({
+        id: item.id,
+        name: item.config.name,
+        agents: item.config.components.agents.map((agent) => ({
+          id: !!agent.config.name ? agent.config.name : agent.label,
+          name: agent.label,
+          enabled: false,
+        })),
+        tools: item.config.components.tools.map((tool) => ({
+          id: !!tool.config.name ? tool.config.name : tool.label,
+          name: tool.label,
+          enabled: false,
+        })),
+      }));
+      setGalleries(data);
+    } catch (error) {
+      console.error("Error fetching galleries:", error);
+      messageApi.error("Failed to fetch galleries");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [user?.id, messageApi]);
+
+  useEffect(() => {
+    fetchGalleries();
+  }, [fetchGalleries]);
 
   const onClose = () => {
     setIsOpen(false);
     setModalScreen("gallery");
   };
 
-  const handleSelectGallery = (gallery: GalleryType) => {
+  const onSelectGallery = (gallery: IGalleryProps) => {
     setSelectedGallery(gallery);
     setIsOpen(false);
   };
 
   const onOptionClick = (modalScreen: "gallery" | "tools" | "agents") => {
-    setModalScreen(modalScreen);
+    if (selectedGallery == null) {
+      setModalScreen("gallery");
+      messageApi.error(
+        "Please select a Gallery before selecting Tools or Agents!."
+      );
+    } else {
+      setModalScreen(modalScreen);
+    }
     setIsOpen(true);
+  };
+
+  const onChangeGallery = () => {
+    setModalScreen("gallery");
+  };
+
+  const onToggleTool = (id: string) => {
+    if (selectedGallery === null) return;
+    setSelectedGallery({
+      ...selectedGallery,
+      tools: selectedGallery.tools.map((tool) =>
+        tool.id === id ? { ...tool, enabled: !tool.enabled } : tool
+      ),
+    });
+  };
+
+  const onToggleAgent = (id: string) => {
+    if (selectedGallery === null) return;
+    setSelectedGallery({
+      ...selectedGallery,
+      agents: selectedGallery.agents.map((agent) =>
+        agent.id === id ? { ...agent, enabled: !agent.enabled } : agent
+      ),
+    });
   };
 
   return (
     <div className="flex flex-col justify-center items-center w-full h-full">
+      {contextHolder}
       <h1 className="text-3xl font-semibold text-center text-black mb-6">
         Build Smart <span className="text-[#115E59]">AI Agents</span> in
         seconds!
@@ -95,16 +160,30 @@ const TaskRequirementInput = () => {
           onClose={onClose}
           title={`Select ${modalScreen}`}
         >
-          {modalScreen === "gallery" ? (
+          {modalScreen === "gallery" && (
             <GalleryModalScreen
-              onSelectGallery={handleSelectGallery}
+              galleries={galleries}
+              onSelectGallery={onSelectGallery}
               selectedGallery={selectedGallery}
             />
-          ) : modalScreen === "tools" ? (
-            <ToolsModalScreen />
-          ) : (
-            <></>
           )}
+          {!!selectedGallery &&
+            modalScreen !== "gallery" &&
+            (modalScreen === "tools" ? (
+              <ToolsModalScreen
+                selectedGallery={selectedGallery.name}
+                onChangeGallery={onChangeGallery}
+                tools={selectedGallery.tools}
+                onToggleTool={onToggleTool}
+              />
+            ) : (
+              <AgentsModalScreen
+                selectedGallery={selectedGallery.name}
+                onChangeGallery={onChangeGallery}
+                agents={selectedGallery.agents}
+                onToggleAgent={onToggleAgent}
+              />
+            ))}
         </Modal>
       )}
     </div>

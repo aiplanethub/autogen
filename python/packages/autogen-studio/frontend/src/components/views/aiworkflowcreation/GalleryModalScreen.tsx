@@ -1,33 +1,20 @@
 import React, { useMemo, useState } from "react";
 import useDebounce, { cn } from "../../utils/utils";
 import Icon from "../../Icon";
-
-type GalleryType = {
-  id: string;
-  name: string;
-};
+import { IGalleryProps } from "../../types/aiworkflowcreation";
 
 interface GallerySelectorProps {
-  onSelectGallery: (gallery: GalleryType) => void;
-  selectedGallery: GalleryType | null;
+  galleries: Array<IGalleryProps>;
+  onSelectGallery: (gallery: IGalleryProps) => void;
+  selectedGallery: IGalleryProps | null;
 }
 
 const GalleryModalScreen: React.FC<GallerySelectorProps> = ({
+  galleries,
   onSelectGallery,
   selectedGallery,
 }) => {
   const [searchTerm, setSearchTerm] = useState("");
-  const [galleries, setGalleries] = useState<GalleryType[]>([
-    { id: "1", name: "New Project" },
-    { id: "2", name: "Tools Tech" },
-    { id: "3", name: "Research Tools" },
-    { id: "4", name: "Growth Insights" },
-    { id: "5", name: "New Project" },
-    { id: "6", name: "Tools Tech" },
-    { id: "7", name: "Research Tools" },
-    { id: "8", name: "Growth Insights" },
-  ]);
-
   const debouncedSearchTerm = useDebounce(searchTerm, 200); // debounce by 200ms
 
   // Filter galleries based on search term
