@@ -1,6 +1,7 @@
 import * as React from "react";
 import Layout from "../components/layout";
 import { graphql } from "gatsby";
+import AIWorkflowCreationManager from "../components/views/aiworkflowcreation/manager";
 
 // markup
 const AIWorkflowCreationPage = ({ data }: any) => {
@@ -11,7 +12,7 @@ const AIWorkflowCreationPage = ({ data }: any) => {
       link={"/aiworkflowcreation"}
     >
       <main style={{ height: "100%" }} className=" h-full ">
-        AIWorkflowCreation
+        <AIWorkflowCreationManager />
       </main>
     </Layout>
   );

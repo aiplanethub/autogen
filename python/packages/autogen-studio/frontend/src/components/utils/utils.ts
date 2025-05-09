@@ -1,5 +1,7 @@
 import { RcFile } from "antd/es/upload";
 import { IStatus } from "../types/app";
+import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
 
 export const getServerUrl = () => {
   return process.env.GATSBY_API_URL || "/api";
@@ -138,3 +140,7 @@ export const convertFilesToBase64 = async (files: RcFile[] = []) => {
     })
   );
 };
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
