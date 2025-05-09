@@ -16,7 +16,7 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children }) => {
         <div className="w-full max-w-lg bg-white rounded-xl shadow-lg overflow-hidden">
           {/* Header */}
           <div className="flex justify-between items-center py-4 px-6 border-b">
-            <h2 className="text-lg font-semibold ">{title}</h2>
+            <h2 className="text-lg font-semibold capitalize">{title}</h2>
             <button
               onClick={onClose}
               className="text-gray-500 hover:text-gray-700"

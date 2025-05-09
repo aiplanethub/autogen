@@ -1,6 +1,5 @@
-import React, { useState } from "react";
-import { Search, Plus } from "lucide-react";
-import { cn } from "../../utils/utils";
+import React, { useMemo, useState } from "react";
+import useDebounce, { cn } from "../../utils/utils";
 import Icon from "../../Icon";
 
 type GalleryType = {
@@ -18,8 +17,7 @@ const GalleryModalScreen: React.FC<GallerySelectorProps> = ({
   selectedGallery,
 }) => {
   const [searchTerm, setSearchTerm] = useState("");
-
-  const sampleGalleries: GalleryType[] = [
+  const [galleries, setGalleries] = useState<GalleryType[]>([
     { id: "1", name: "New Project" },
     { id: "2", name: "Tools Tech" },
     { id: "3", name: "Research Tools" },
@@ -28,18 +26,23 @@ const GalleryModalScreen: React.FC<GallerySelectorProps> = ({
     { id: "6", name: "Tools Tech" },
     { id: "7", name: "Research Tools" },
     { id: "8", name: "Growth Insights" },
-  ];
+  ]);
+
+  const debouncedSearchTerm = useDebounce(searchTerm, 200); // debounce by 200ms
 
   // Filter galleries based on search term
-  const filteredGalleries = sampleGalleries.filter((gallery) =>
-    gallery.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredGalleries = useMemo(() => {
+    return galleries.filter((gallery) =>
+      gallery.name.toLowerCase().includes(debouncedSearchTerm.toLowerCase())
+    );
+  }, [debouncedSearchTerm]);
+
   return (
     <div className="p-6">
       {/* Search */}
       <div className="relative mb-6">
         <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-          <Search className="h-4 w-4 text-gray-500" />
+          <Icon name="search" className="h-4 w-4 text-gray-500" />
         </div>
         <input
           type="text"
@@ -53,14 +56,14 @@ const GalleryModalScreen: React.FC<GallerySelectorProps> = ({
       {/* Create New Gallery Button */}
       <button className="flex items-center text-base pl-1 font-medium mb-6 text-teal-700 hover:text-teal-800">
         Create New Gallery
-        <Plus className="ml-1" size={18} />
+        <Icon name="plus" className="ml-1" size={18} />
       </button>
 
       {/* Gallery List */}
       <div
         className={cn(
           "space-y-3 max-h-[270px] overflow-y-auto",
-          sampleGalleries.length > 4 && "pr-3"
+          filteredGalleries.length > 4 && "pr-3"
         )}
       >
         {filteredGalleries.map((gallery) => (

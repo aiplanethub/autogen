@@ -1,8 +1,9 @@
 import React, { useState } from "react";
-import { Paperclip, Sparkles, Users, Send } from "lucide-react";
 import { Textarea, Button } from "@headlessui/react";
 import Modal from "./Modal";
 import GalleryModalScreen from "./GalleryModalScreen";
+import ToolsModalScreen from "./options/ToolsModalScreen";
+import Icon from "../../Icon";
 
 type GalleryType = {
   id: string;
@@ -11,18 +12,27 @@ type GalleryType = {
 
 const TaskRequirementInput = () => {
   const [taskRequirement, setTaskRequirement] = useState("");
-  const [isGalleryModalOpen, setIsGalleryModalOpen] = useState(false);
+  const [modalScreen, setModalScreen] = useState<
+    "gallery" | "tools" | "agents"
+  >("gallery");
+  const [isOpen, setIsOpen] = useState(false);
   const [selectedGallery, setSelectedGallery] = useState<GalleryType | null>(
     null
   );
 
-  const onGalleryModalClose = () => {
-    setIsGalleryModalOpen(false);
+  const onClose = () => {
+    setIsOpen(false);
+    setModalScreen("gallery");
   };
 
   const handleSelectGallery = (gallery: GalleryType) => {
     setSelectedGallery(gallery);
-    setIsGalleryModalOpen(false);
+    setIsOpen(false);
+  };
+
+  const onOptionClick = (modalScreen: "gallery" | "tools" | "agents") => {
+    setModalScreen(modalScreen);
+    setIsOpen(true);
   };
 
   return (
@@ -44,24 +54,27 @@ const TaskRequirementInput = () => {
         <div className="flex items-center justify-between">
           <div className="flex space-x-2">
             <Button
-              onClick={() => setIsGalleryModalOpen(true)}
+              onClick={() => {}}
               className="w-8 h-8 rounded-full hover:bg-gray-100 transition-colors border flex justify-center items-center"
             >
-              <Paperclip className="h-4 w-4" />
+              <Icon name="paperclip" className="h-4 w-4" />
             </Button>
 
             <Button className="h-8 px-3 rounded-full hover:bg-gray-100 transition-colors flex items-center border">
-              <Sparkles className="h-4 w-4 mr-2" />
+              <Icon name="sparkles" className="h-4 w-4 mr-2" />
               <span className="text-sm font-normal">Prompts</span>
             </Button>
 
-            <Button className="px-3 h-8 rounded-full hover:bg-gray-100 transition-colors flex items-center border">
-              <Users className="h-4 w-4 mr-2" />
+            <Button
+              onClick={() => onOptionClick("agents")}
+              className="px-3 h-8 rounded-full hover:bg-gray-100 transition-colors flex items-center border"
+            >
+              <Icon name="users" className="h-4 w-4 mr-2" />
               <span className="text-sm font-normal">Agents</span>
             </Button>
 
             <Button
-              onClick={() => setIsGalleryModalOpen(true)}
+              onClick={() => onOptionClick("tools")}
               className="px-3 h-8 rounded-full hover:bg-gray-100 transition-colors flex items-center border"
             >
               {/* <Tool className="h-5 w-5 mr-2" /> */}
@@ -70,22 +83,30 @@ const TaskRequirementInput = () => {
           </div>
 
           <Button className="bg-[#115E59] hover:bg-green-800 text-white py-2 px-4 rounded-lg flex items-center transition-colors font-medium text-sm">
-            <Send className="h-4 w-4 mr-2" />
+            <Icon name="send" className="h-4 w-4 mr-2" />
             Build Agent
           </Button>
         </div>
       </div>
 
-      <Modal
-        isOpen={isGalleryModalOpen}
-        onClose={onGalleryModalClose}
-        title="Select Gallery"
-      >
-        <GalleryModalScreen
-          onSelectGallery={handleSelectGallery}
-          selectedGallery={selectedGallery}
-        />
-      </Modal>
+      {isOpen && (
+        <Modal
+          isOpen={isOpen}
+          onClose={onClose}
+          title={`Select ${modalScreen}`}
+        >
+          {modalScreen === "gallery" ? (
+            <GalleryModalScreen
+              onSelectGallery={handleSelectGallery}
+              selectedGallery={selectedGallery}
+            />
+          ) : modalScreen === "tools" ? (
+            <ToolsModalScreen />
+          ) : (
+            <></>
+          )}
+        </Modal>
+      )}
     </div>
   );
 };

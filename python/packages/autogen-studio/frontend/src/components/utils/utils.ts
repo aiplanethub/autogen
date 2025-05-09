@@ -2,6 +2,7 @@ import { RcFile } from "antd/es/upload";
 import { IStatus } from "../types/app";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { useEffect, useState } from "react";
 
 export const getServerUrl = () => {
   return process.env.GATSBY_API_URL || "/api";
@@ -143,4 +144,15 @@ export const convertFilesToBase64 = async (files: RcFile[] = []) => {
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
+}
+
+export default function useDebounce<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState(value);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+
+  return debounced;
 }
