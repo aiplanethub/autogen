@@ -9,7 +9,14 @@ export interface AgentAndToolProps {
   enabled: boolean;
 }
 
-export type ModalScreens = "gallery" | "tools" | "agents";
+export type ModalScreens = "gallery" | "tools" | "agents" | "prompts";
+export type PromptCategory = "MARKETING" | "EDUCATION" | "BANKING";
+
+export interface IPrompt {
+  id: string;
+  category: PromptCategory;
+  content: string;
+}
 
 export interface IGalleryProps {
   id: number | undefined;

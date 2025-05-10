@@ -1,4 +1,16 @@
-import { Search, Plus, Paperclip, Sparkles, Users, Send } from "lucide-react";
+import {
+  Search,
+  Plus,
+  Paperclip,
+  Sparkles,
+  Users,
+  Send,
+  BookOpen,
+  Building,
+  TrendingUp,
+  LayoutGrid,
+  X,
+} from "lucide-react";
 import GalleryIcon from "./custom/GalleryIcon";
 
 export const iconsMap = {
@@ -9,6 +21,11 @@ export const iconsMap = {
   sparkles: Sparkles,
   users: Users,
   send: Send,
+  bookopen: BookOpen,
+  building: Building,
+  trendingup: TrendingUp,
+  layoutgrid: LayoutGrid,
+  x: X,
 } as const;
 
 export type IconName = keyof typeof iconsMap;

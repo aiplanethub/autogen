@@ -25,14 +25,14 @@ const AgentsModalScreen: React.FC<{
       {/* Selected Gallery */}
       <div className="flex justify-between items-center mb-6 mx-6">
         <div className="flex items-center space-x-2">
-          <Icon name="galleryIcon" className="text-[#666666]" size={22} />
-          <h1 className="text-base font-medium text-[#666666]">
+          <Icon name="galleryIcon" className="text-primary" size={22} />
+          <h1 className="text-base font-medium text-primary">
             Gallery: {selectedGallery}
           </h1>
         </div>
         <button
           onClick={() => onChangeGallery()}
-          className="text-teal-600 underline py-2 px-4 rounded-xl hover:bg-teal-50 transition-colors"
+          className="text-[#115E59] hover:bg-[#115E59] hover:text-white underline hover:no-underline py-2 px-4 rounded-md transition-colors"
         >
           Change
         </button>
@@ -46,7 +46,7 @@ const AgentsModalScreen: React.FC<{
         <input
           type="text"
           placeholder="Search Gallery"
-          className="w-full py-2 pl-10 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+          className="w-full py-2 pl-10 bg-primary border border-secondary text-primary rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
         />

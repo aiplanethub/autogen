@@ -6,9 +6,14 @@ import ToolsModalScreen from "./options/ToolsModalScreen";
 import Icon from "../../Icon";
 import AgentsModalScreen from "./options/AgentsModalScreen";
 import { message } from "antd";
-import { IGalleryProps, ModalScreens } from "../../types/aiworkflowcreation";
+import {
+  IGalleryProps,
+  IPrompt,
+  ModalScreens,
+} from "../../types/aiworkflowcreation";
 import { appContext } from "../../../hooks/provider";
 import { galleryAPI } from "../gallery/api";
+import PromptModal from "./options/prompts/PromptModal";
 
 const TaskRequirementInput = () => {
   const [messageApi, contextHolder] = message.useMessage();
@@ -20,6 +25,7 @@ const TaskRequirementInput = () => {
   const [selectedGallery, setSelectedGallery] = useState<IGalleryProps | null>(
     null
   );
+  const [selectedPrompt, setSelectedPrompt] = useState<IPrompt | null>(null);
   const { user } = useContext(appContext);
   const fetchGalleries = useCallback(async () => {
     if (!user?.id) return;
@@ -63,8 +69,8 @@ const TaskRequirementInput = () => {
     setIsOpen(false);
   };
 
-  const onOptionClick = (modalScreen: "gallery" | "tools" | "agents") => {
-    if (selectedGallery == null) {
+  const onOptionClick = (modalScreen: ModalScreens) => {
+    if (selectedGallery == null && modalScreen !== "prompts") {
       setModalScreen("gallery");
       messageApi.error(
         "Please select a Gallery before selecting Tools or Agents!."
@@ -99,17 +105,22 @@ const TaskRequirementInput = () => {
     });
   };
 
+  const onSelectPrompt = (prompt: IPrompt) => {
+    setSelectedPrompt(prompt);
+    setIsOpen(false);
+  };
+
   return (
     <div className="flex flex-col justify-center items-center w-full h-full">
       {contextHolder}
-      <h1 className="text-3xl font-semibold text-center text-black mb-6">
+      <h1 className="text-3xl font-semibold text-center mb-6">
         Build Smart <span className="text-[#115E59]">AI Agents</span> in
         seconds!
       </h1>
 
-      <div className="border-2 border-[#115E59] p-4 shadow-sm max-w-[815px] w-full rounded-[20px]">
+      <div className="border border-[#115E59] p-4 shadow-sm max-w-[815px] w-full rounded-[20px]">
         <Textarea
-          className="w-full p-3 focus:ring-0 focus:outline-none text-base font-normal placeholder:text-gray-400 mb-3"
+          className="w-full p-3 focus:ring-0 focus:outline-none text-base bg-transparent font-normal placeholder:text-gray-400 mb-3"
           placeholder="Type a prompt to complete a task"
           rows={3}
           value={taskRequirement}
@@ -120,19 +131,22 @@ const TaskRequirementInput = () => {
           <div className="flex space-x-2">
             <Button
               onClick={() => {}}
-              className="w-8 h-8 rounded-full hover:bg-gray-100 transition-colors border flex justify-center items-center"
+              className="w-8 h-8 rounded-full hover:bg-secondary transition-colors border border-secondary flex justify-center items-center"
             >
               <Icon name="paperclip" className="h-4 w-4" />
             </Button>
 
-            <Button className="h-8 px-3 rounded-full hover:bg-gray-100 transition-colors flex items-center border">
+            <Button
+              onClick={() => onOptionClick("prompts")}
+              className="h-8 px-3 rounded-full hover:bg-secondary transition-colors flex items-center border border-secondary"
+            >
               <Icon name="sparkles" className="h-4 w-4 mr-2" />
               <span className="text-sm font-normal">Prompts</span>
             </Button>
 
             <Button
               onClick={() => onOptionClick("agents")}
-              className="px-3 h-8 rounded-full hover:bg-gray-100 transition-colors flex items-center border"
+              className="px-3 h-8 rounded-full hover:bg-secondary transition-colors flex items-center border border-secondary"
             >
               <Icon name="users" className="h-4 w-4 mr-2" />
               <span className="text-sm font-normal">Agents</span>
@@ -140,7 +154,7 @@ const TaskRequirementInput = () => {
 
             <Button
               onClick={() => onOptionClick("tools")}
-              className="px-3 h-8 rounded-full hover:bg-gray-100 transition-colors flex items-center border"
+              className="px-3 h-8 rounded-full hover:bg-secondary transition-colors flex items-center border border-secondary"
             >
               {/* <Tool className="h-5 w-5 mr-2" /> */}
               <span className="text-sm font-normal">Tools</span>
@@ -154,7 +168,7 @@ const TaskRequirementInput = () => {
         </div>
       </div>
 
-      {isOpen && (
+      {isOpen && modalScreen !== "prompts" && (
         <Modal
           isOpen={isOpen}
           onClose={onClose}
@@ -185,6 +199,15 @@ const TaskRequirementInput = () => {
               />
             ))}
         </Modal>
+      )}
+
+      {isOpen && modalScreen === "prompts" && (
+        <PromptModal
+          isOpen={isOpen}
+          onClose={onClose}
+          selectedPrompt={!!selectedPrompt ? selectedPrompt : null}
+          onSelectPrompt={onSelectPrompt}
+        />
       )}
     </div>
   );

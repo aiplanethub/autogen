@@ -34,7 +34,7 @@ const GalleryModalScreen: React.FC<GallerySelectorProps> = ({
         <input
           type="text"
           placeholder="Search Gallery"
-          className="w-full py-2 pl-10 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+          className="w-full py-2 pl-10 bg-primary border text-primary border-secondary rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
         />
@@ -57,10 +57,10 @@ const GalleryModalScreen: React.FC<GallerySelectorProps> = ({
           <button
             key={gallery.id}
             className={cn(
-              "w-full flex items-center p-4 rounded-lg transition",
+              "w-full flex items-center p-4 rounded-lg transition border",
               gallery.id === selectedGallery?.id
-                ? "bg-gray-100 border border-teal-700 text-teal-700"
-                : "hover:bg-gray-50 border border-gray-200"
+                ? "bg-secondary text-teal-700 border-teal-700"
+                : "hover:bg-tertiary text-secondary border-secondary"
             )}
             onClick={() => onSelectGallery(gallery)}
           >
@@ -71,7 +71,7 @@ const GalleryModalScreen: React.FC<GallerySelectorProps> = ({
                 "mr-3",
                 gallery.id === selectedGallery?.id
                   ? "text-teal-700"
-                  : "text-gray-500"
+                  : "text-secondary"
               )}
             />
             <span className="text-sm font-normal">{gallery.name}</span>
