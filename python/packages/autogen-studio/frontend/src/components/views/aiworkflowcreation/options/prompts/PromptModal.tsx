@@ -1,9 +1,11 @@
-import React, { useState } from "react";
-import { Search, X, Plus } from "lucide-react";
+import React, { useMemo, useState } from "react";
+import { Search } from "lucide-react";
 import PromptCard from "./PromptCard";
 import CategoryButton from "./CategoryButton";
 import Icon from "../../../../Icon";
 import { IPrompt } from "../../../../types/aiworkflowcreation";
+import CreatePromptModal from "./CreatePromptModal";
+import useDebounce from "../../../../utils/utils";
 
 const PromptModal: React.FC<{
   isOpen: boolean;
@@ -13,8 +15,9 @@ const PromptModal: React.FC<{
 }> = ({ isOpen, onClose, selectedPrompt, onSelectPrompt }) => {
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [isCreatePromptModalOpen, setIsCreatePromptModalOpen] = useState(false);
 
-  const samplePrompts: IPrompt[] = [
+  const [samplePrompts, setSamplePrompts] = useState<Array<IPrompt>>([
     {
       id: "1",
       category: "MARKETING",
@@ -69,17 +72,29 @@ const PromptModal: React.FC<{
       content:
         "Help me create a project timeline for the project I'm developing. The design has to be finished and signed of by the Product Manager, we have to do User Research, Handoff the concept to the development team and let them code the app.",
     },
-  ];
+  ]);
 
-  const filteredPrompts = samplePrompts.filter((prompt) => {
-    const matchesCategory = activeCategory
-      ? prompt.category === activeCategory
-      : true;
-    const matchesSearch =
-      searchQuery === "" ||
-      prompt.content.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesCategory && matchesSearch;
-  });
+  const debouncedSearchTerm = useDebounce(searchQuery, 200); // debounce by 200ms
+
+  const filteredPrompts = useMemo(() => {
+    return samplePrompts.filter((prompt) => {
+      const matchesCategory = activeCategory
+        ? prompt.category === activeCategory
+        : true;
+      const matchesSearch =
+        searchQuery === "" ||
+        prompt.content.toLowerCase().includes(searchQuery.toLowerCase());
+      return matchesCategory && matchesSearch;
+    });
+  }, [samplePrompts, activeCategory, debouncedSearchTerm]);
+
+  const onSavePrompt = (prompt: IPrompt) => {
+    setSamplePrompts([
+      ...samplePrompts,
+      { ...prompt, id: `${samplePrompts.length + 1}` },
+    ]);
+    setIsCreatePromptModalOpen(false);
+  };
 
   return (
     <>
@@ -91,7 +106,10 @@ const PromptModal: React.FC<{
               <h2 className="text-2xl font-semibold mb-5">Prompts</h2>
 
               {/* Create Prompt Button */}
-              <button className="bg-[#115E59] hover:bg-green-800 text-white font-normal text-base px-4 py-2 rounded-lg mb-5 flex items-center justify-center">
+              <button
+                onClick={() => setIsCreatePromptModalOpen(true)}
+                className="bg-[#115E59] hover:bg-green-800 text-white font-normal text-base px-4 py-2 rounded-lg mb-5 flex items-center justify-center"
+              >
                 <span>Create Prompt</span>
                 <Icon name="plus" size={20} className="ml-2" />
               </button>
@@ -177,6 +195,14 @@ const PromptModal: React.FC<{
               <Icon name="x" size={20} />
             </button>
           </div>
+
+          {isCreatePromptModalOpen && (
+            <CreatePromptModal
+              isOpen={isCreatePromptModalOpen}
+              onClose={() => setIsCreatePromptModalOpen(false)}
+              onSavePrompt={onSavePrompt}
+            />
+          )}
         </div>
       )}
     </>
