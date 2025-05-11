@@ -29,32 +29,9 @@ const AIWorkflowCreationManager = () => {
 
   const [currentSession, setCurrentSession] =
     useState<IAIWorkflowCreationSession | null>(null);
-  const [sessions, setSessions] = useState<Array<IAIWorkflowCreationSession>>([
-    {
-      id: 1,
-      name: "User Proxy Session",
-      knowledgebase: {
-        id: "userproxysession",
-        name: "UserProxySessionKB",
-      },
-    },
-    {
-      id: 2,
-      name: "Assistant Agent Session",
-      knowledgebase: {
-        id: "assistantagentsession",
-        name: "AssistantAgentSessionKB",
-      },
-    },
-    {
-      id: 3,
-      name: "Web Agent Session",
-      knowledgebase: {
-        id: "webagentsession",
-        name: "WebAgentSessionKB",
-      },
-    },
-  ]);
+  const [sessions, setSessions] = useState<Array<IAIWorkflowCreationSession>>(
+    []
+  );
 
   // Update URL when session changes
   useEffect(() => {
@@ -69,7 +46,7 @@ const AIWorkflowCreationManager = () => {
 
   useEffect(() => {
     const fetchSession = () => {
-      const data = [
+      const data: Array<IAIWorkflowCreationSession> = [
         {
           id: 1,
           name: "User Proxy Session",
@@ -194,13 +171,22 @@ const AIWorkflowCreationManager = () => {
           onDeleteSession={onDeleteSession}
         />
       </div>
+
+      {/* Main Content */}
       <div
         className={`flex-1 transition-all -mr-6 duration-200 ${
           isSidebarOpen ? "ml-64" : "ml-12"
         }`}
       >
-        <TaskRequirementInput />
+        {sessions.length === 0 && currentSession === null ? (
+          <div className="flex items-center justify-center h-[calc(100vh-120px)] text-secondary">
+            Select a session from the sidebar or create a new one
+          </div>
+        ) : (
+          <TaskRequirementInput />
+        )}
       </div>
+
       {/* Create Session Modal */}
       {isSessionCreateModalOpen && (
         <CreateSessionModal
