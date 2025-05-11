@@ -24,3 +24,25 @@ export interface IGalleryProps {
   agents: Array<AgentAndToolProps>;
   tools: Array<AgentAndToolProps>;
 }
+
+export interface IAIWorkflowCreationKB {
+  id: string;
+  name: string;
+}
+
+export interface IAIWorkflowCreationSession {
+  id: number;
+  name: string;
+  knowledgebase: IAIWorkflowCreationKB;
+}
+
+export interface IAIWorkflowCreationSidebarProps {
+  isOpen: boolean;
+  sessions: Array<IAIWorkflowCreationSession>;
+  currentSession: IAIWorkflowCreationSession | null;
+  onToggle: () => void;
+  onSelectSession: (session: IAIWorkflowCreationSession) => void;
+  onCreateSession: () => void;
+  onDeleteSession: (sessionId: number) => void;
+  isLoading?: boolean;
+}
