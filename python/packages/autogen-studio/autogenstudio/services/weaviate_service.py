@@ -12,7 +12,7 @@ from fastapi import HTTPException, status
 from weaviate.classes.config import Configure
 from weaviate.classes.init import Auth
 
-from aiplatform.core.config import get_settings
+from autogenstudio.core.config import get_settings
 
 
 class WeaviateService:
@@ -29,7 +29,13 @@ class WeaviateService:
 
     async def __aenter__(self):
         weaviate_api_key = self.settings.WEAVIATE_API_KEY
-        self.client = weaviate.connect_to_local(
+        self.client = weaviate.connect_to_custom(
+            http_host=self.settings.WEAVIATE_HTTP_HOST,
+            http_port=443,
+            http_secure=True,
+            grpc_host=self.settings.WEAVIATE_GRPC_HOST,
+            grpc_port=443,
+            grpc_secure=True,
             auth_credentials=Auth.api_key(weaviate_api_key),
             headers={
                 "X-Azure-Api-Key": self.settings.AZURE_API_KEY,
