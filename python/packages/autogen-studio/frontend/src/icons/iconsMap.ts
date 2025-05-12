@@ -10,6 +10,7 @@ import {
   TrendingUp,
   LayoutGrid,
   X,
+  ChevronRight,
 } from "lucide-react";
 import GalleryIcon from "./custom/GalleryIcon";
 
@@ -26,6 +27,7 @@ export const iconsMap = {
   trendingup: TrendingUp,
   layoutgrid: LayoutGrid,
   x: X,
+  chevronright: ChevronRight,
 } as const;
 
 export type IconName = keyof typeof iconsMap;

@@ -7,6 +7,7 @@ import {
 } from "../../types/aiworkflowcreation";
 import { message } from "antd";
 import CreateSessionModal from "./CreateSessionModal";
+import Icon from "../../Icon";
 
 const AIWorkflowCreationManager = () => {
   const [isSessionCreateModalOpen, setIsSessionCreateModalOpen] =
@@ -178,13 +179,25 @@ const AIWorkflowCreationManager = () => {
           isSidebarOpen ? "ml-64" : "ml-12"
         }`}
       >
-        {sessions.length === 0 && currentSession === null ? (
-          <div className="flex items-center justify-center h-[calc(100vh-120px)] text-secondary">
-            Select a session from the sidebar or create a new one
+        <div className="p-4 pt-2 h-full w-full">
+          {/* Breadcrumb */}
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-primary font-medium">Sessions</span>
+            {currentSession && (
+              <>
+                <Icon name="chevronright" className="w-4 h-4 text-secondary" />
+                <span className="text-secondary">{currentSession.name}</span>
+              </>
+            )}
           </div>
-        ) : (
-          <TaskRequirementInput />
-        )}
+          {sessions.length === 0 && currentSession === null ? (
+            <div className="flex items-center justify-center h-[calc(100vh-120px)] text-secondary">
+              Select a session from the sidebar or create a new one
+            </div>
+          ) : (
+            <TaskRequirementInput />
+          )}
+        </div>
       </div>
 
       {/* Create Session Modal */}
