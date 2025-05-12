@@ -11,6 +11,7 @@ import {
   LayoutGrid,
   X,
   ChevronRight,
+  Brain,
 } from "lucide-react";
 import GalleryIcon from "./custom/GalleryIcon";
 
@@ -28,6 +29,7 @@ export const iconsMap = {
   layoutgrid: LayoutGrid,
   x: X,
   chevronright: ChevronRight,
+  brain: Brain,
 } as const;
 
 export type IconName = keyof typeof iconsMap;

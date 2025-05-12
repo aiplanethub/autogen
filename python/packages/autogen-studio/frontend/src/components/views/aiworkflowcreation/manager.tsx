@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import TaskRequirementInput from "./taskrequirementinput";
+import Assistant from "./chat/Assistant";
 import AIWorkflowCreationSidebar from "./SideBar";
 import {
   IAIWorkflowCreationKB,
@@ -179,7 +179,7 @@ const AIWorkflowCreationManager = () => {
           isSidebarOpen ? "ml-64" : "ml-12"
         }`}
       >
-        <div className="p-4 pt-2 h-full w-full">
+        <div className="px-4 py-2 w-full h-full">
           {/* Breadcrumb */}
           <div className="flex items-center gap-2 text-sm">
             <span className="text-primary font-medium">Sessions</span>
@@ -190,12 +190,14 @@ const AIWorkflowCreationManager = () => {
               </>
             )}
           </div>
+
+          {/* Content Area */}
           {sessions.length === 0 && currentSession === null ? (
             <div className="flex items-center justify-center h-[calc(100vh-120px)] text-secondary">
               Select a session from the sidebar or create a new one
             </div>
           ) : (
-            <TaskRequirementInput />
+            <Assistant />
           )}
         </div>
       </div>

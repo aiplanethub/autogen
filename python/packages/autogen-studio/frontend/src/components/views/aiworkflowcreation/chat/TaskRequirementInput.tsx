@@ -1,21 +1,24 @@
 import React, { useCallback, useContext, useEffect, useState } from "react";
 import { Textarea, Button } from "@headlessui/react";
-import Modal from "./Modal";
-import GalleryModalScreen from "./GalleryModalScreen";
-import ToolsModalScreen from "./options/ToolsModalScreen";
-import Icon from "../../Icon";
-import AgentsModalScreen from "./options/AgentsModalScreen";
+import Modal from "../Modal";
+import GalleryModalScreen from "../GalleryModalScreen";
+import ToolsModalScreen from "../options/ToolsModalScreen";
+import Icon from "../../../Icon";
+import AgentsModalScreen from "../options/AgentsModalScreen";
 import { message } from "antd";
 import {
   IGalleryProps,
   IPrompt,
   ModalScreens,
-} from "../../types/aiworkflowcreation";
-import { appContext } from "../../../hooks/provider";
-import { galleryAPI } from "../gallery/api";
-import PromptModal from "./options/prompts/PromptModal";
+} from "../../../types/aiworkflowcreation";
+import { appContext } from "../../../../hooks/provider";
+import { galleryAPI } from "../../gallery/api";
+import PromptModal from "../options/prompts/PromptModal";
+import { cn } from "../../../utils/utils";
 
-const TaskRequirementInput = () => {
+const TaskRequirementInput: React.FC<{ hasConversations: boolean }> = ({
+  hasConversations,
+}) => {
   const [messageApi, contextHolder] = message.useMessage();
   const [isLoading, setIsLoading] = useState(false);
   const [galleries, setGalleries] = useState<IGalleryProps[]>([]);
@@ -111,18 +114,29 @@ const TaskRequirementInput = () => {
   };
 
   return (
-    <div className="flex flex-col justify-center items-center w-full h-full">
+    <div
+      className={cn(
+        "flex flex-col justify-center items-center w-full",
+        hasConversations ? "h-auto" : "h-full"
+      )}
+    >
       {contextHolder}
-      <h1 className="text-3xl font-semibold text-center mb-6">
-        Build Smart <span className="text-[#115E59]">AI Agents</span> in
-        seconds!
-      </h1>
+      {!hasConversations && (
+        <h1 className="text-3xl font-semibold text-center mb-6">
+          Build Smart <span className="text-[#115E59]">AI Agents</span> in
+          seconds!
+        </h1>
+      )}
 
-      <div className="border border-[#115E59] p-4 shadow-sm max-w-[815px] w-full rounded-[20px]">
+      <div
+        className={cn(
+          "border border-[#115E59] p-4 shadow-sm max-w-[815px] w-full rounded-[20px]"
+        )}
+      >
         <Textarea
           className="w-full p-3 focus:ring-0 focus:outline-none text-base bg-transparent font-normal placeholder:text-gray-400 mb-3"
           placeholder="Type a prompt to complete a task"
-          rows={3}
+          rows={hasConversations ? 1 : 3}
           value={taskRequirement}
           onChange={(e) => setTaskRequirement(e.target.value)}
         />
@@ -161,9 +175,17 @@ const TaskRequirementInput = () => {
             </Button>
           </div>
 
-          <Button className="bg-[#115E59] hover:bg-green-800 text-white py-2 px-4 rounded-lg flex items-center transition-colors font-medium text-sm">
-            <Icon name="send" className="h-4 w-4 mr-2" />
-            Build Agent
+          <Button
+            className={cn(
+              "bg-[#115E59] hover:bg-green-800 text-white py-2 px-4 rounded-lg flex items-center transition-colors font-medium text-sm",
+              hasConversations && "px-2"
+            )}
+          >
+            <Icon
+              name="send"
+              className={cn("h-4 w-4", !hasConversations && "mr-2")}
+            />
+            {!hasConversations && "Build Agent"}
           </Button>
         </div>
       </div>
