@@ -23,9 +23,14 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
 ]
 dependencies = [
+    "autogen-agentchat",
+    "autogen-core",
     "pandas>=2.2.3",
+    "pdf2image>=1.17.0",
     "pydantic>=2.0.0",
     # List other dependencies here
+    "pypdf2>=3.0.1",
+    "pytesseract>=0.3.13",
 ]
 
 [project.optional-dependencies]
@@ -56,3 +61,7 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
+
+[tool.uv.sources]
+autogen-agentchat = { workspace = true }
+autogen-core = { workspace = true }
