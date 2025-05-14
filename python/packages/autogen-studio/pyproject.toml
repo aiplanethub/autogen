@@ -4,12 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "autogenstudio"
-authors = [
-  { name="AutoGen Team", email="autogen@microsoft.com" },
-]
+authors = [{ name = "AutoGen Team", email = "autogen@microsoft.com" }]
 description = "AutoGen Studio"
 readme = "README.md"
-license = {file = "LICENSE-CODE"}
+license = { file = "LICENSE-CODE" }
 requires-python = ">=3.9"
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -22,22 +20,31 @@ dependencies = [
     "pydantic",
     "pydantic-settings",
     "fastapi[standard]",
-    "typer", 
+    "typer",
     "aiofiles",
     "python-dotenv",
-    "websockets", 
+    "websockets",
     "sqlmodel",
     "psycopg",
     "alembic",
     "loguru",
     "pyyaml",
     "html2text",
+    "aioboto3",
+    "llama-cloud-services",
     "autogen-core>=0.4.9.2,<0.6",
     "autogen-agentchat>=0.4.9.2,<0.6",
     "autogen-ext[magentic-one, openai, azure]>=0.4.2,<0.6",
     "anthropic",
 ]
-optional-dependencies = {web = ["fastapi", "uvicorn"], database = ["psycopg"]}
+optional-dependencies = { dev = [
+    "types-aioboto3[s3]",
+], web = [
+    "fastapi",
+    "uvicorn",
+], database = [
+    "psycopg",
+] }
 
 dynamic = ["version"]
 
@@ -46,8 +53,8 @@ include-package-data = true
 
 
 [tool.setuptools.dynamic]
-version = {attr = "autogenstudio.version.VERSION"}
-readme = {file = ["README.md"]}
+version = { attr = "autogenstudio.version.VERSION" }
+readme = { file = ["README.md"] }
 
 [tool.setuptools.packages.find]
 include = ["autogenstudio*"]
@@ -75,9 +82,7 @@ autogenstudio = "autogenstudio.cli:run"
 [tool.ruff]
 extend = "../../pyproject.toml"
 exclude = ["build", "dist"]
-include = [
-    "autogenstudio/**"
-]
+include = ["autogenstudio/**"]
 
 [tool.ruff.lint]
 ignore = ["B008"]
