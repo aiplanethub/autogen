@@ -1,5 +1,6 @@
+from typing import Optional
 from ..database import DatabaseManager
-from ..datamodel.builder import *
+from ..datamodel import BuilderSession
 
 
 class BuilderService:
@@ -47,7 +48,14 @@ class BuilderService:
 
         return session.messages
 
-    def get_config(self, user_id: str):
+    def get_workflow_config(self, user_id: str):
+        session = self.get_session(user_id)
+        if not session:
+            return None
+
+        return session.workflow_config
+
+    def get_config_selection(self, user_id):
         session = self.get_session(user_id)
         if not session:
             return None

@@ -36,13 +36,38 @@ def create_session(
         )
 
 
-@router.get("/config")
+@router.get("/workflow-config")
 def get_config(
     user_id: str = Depends(get_current_user), db: DatabaseManager = Depends(get_db)
 ):
     try:
         service = BuilderService(db)
-        config = service.get_config(user_id)
+        config = service.get_workflow_config(user_id)
+        if not config:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+            )
+
+        return Response(
+            data=config.model_dump(), status=True, message="Config fetched successfully"
+        )
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
+
+
+@router.get("/config-selection")
+def get_config_selection(
+    user_id: str = Depends(get_current_user), db: DatabaseManager = Depends(get_db)
+):
+    try:
+        service = BuilderService(db)
+        config = service.get_config_selection(user_id)
         if not config:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
