@@ -22,8 +22,8 @@ class WeaviateService:
 
     async def __aenter__(self):
         weaviate_api_key = os.getenv("WEAVIATE_API_KEY")
-        weaviate_url = os.getenv("WEAVIATE_URL") or "y7wcfexstxwetjucs7gk5q.c0.asia-southeast1.gcp.weaviate.cloud"
-        # weaviate_url = self.settings.WEAVIATE_URL if hasattr(self.settings, 'WEAVIATE_URL') else "y7wcfexstxwetjucs7gk5q.c0.asia-southeast1.gcp.weaviate.cloud"
+        weaviate_url = os.getenv("WEAVIATE_URL")
+        
         
         # Use WeaviateClient for v4 API
         self.client = weaviate.connect_to_weaviate_cloud(
