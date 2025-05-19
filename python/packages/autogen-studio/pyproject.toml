@@ -36,6 +36,7 @@ dependencies = [
     "autogen-agentchat>=0.4.9.2,<0.6",
     "autogen-ext[magentic-one, openai, azure]>=0.4.2,<0.6",
     "anthropic",
+    "weaviate-client>=4.14.3",
 ]
 optional-dependencies = { dev = [
     "types-aioboto3[s3]",
