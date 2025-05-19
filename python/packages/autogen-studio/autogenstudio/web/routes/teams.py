@@ -54,7 +54,7 @@ async def create_team(team: Team, db=Depends(get_db)) -> Dict:
 
 @router.post("/plan")
 async def plan_team(
-    user_id: str = Form(...),
+    gallery_id: int = Form(...),
     prompt: str = Form(...),
     knowledge_base: str = Form(...),
     file: UploadFile = File(None),
@@ -62,15 +62,13 @@ async def plan_team(
 ) -> Dict:
     try:
         settings = get_settings()
-        result = db.get(Gallery, filters={"user_id": user_id})
+        result = db.get(Gallery, filters={"id": gallery_id})
         if not result.data or len(result.data) == 0:
             # create a default gallery entry
             gallery_config = create_default_gallery()
-            default_gallery = Gallery(
-                user_id=user_id, config=gallery_config.model_dump()
-            )
+            default_gallery = Gallery(id=gallery_id, config=gallery_config.model_dump())
             db.upsert(default_gallery)
-            result = db.get(Gallery, filters={"user_id": user_id})
+            result = db.get(Gallery, filters={"id": gallery_id})
 
         tools = result.data[0].config["components"]["tools"]
         planner_system_message = PLANNER_PROMPT.format(
@@ -114,9 +112,7 @@ async def plan_team(
             "status": True,
             "data": {
                 "response": result.messages[-1].content.dict(),
-                "agents": [
-                    agent.model_dump() for agent in selector_gc._participant_names
-                ],
+                "agents": selector_gc._participant_names,
             },
         }
     except Exception as e:
