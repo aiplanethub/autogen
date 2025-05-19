@@ -7,11 +7,11 @@ for handling PDFs, JSON files, images, OCR-processed PDFs, and Excel sheets.
 
 import json
 import os
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Union, Mapping
 
 from autogen_agentchat.messages import BaseChatMessage, MessageFactory
 from autogen_core import Image
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 
 class FileMessage(BaseChatMessage):
@@ -29,6 +29,9 @@ class FileMessage(BaseChatMessage):
     exists: bool = True
     """Whether the file exists (default: True)."""
 
+    raw_content: Optional[Any] = Field(default=None, exclude=True)
+    """Internal storage for file content."""
+
     metadata: Dict[str, str] = {}
     """Additional metadata about the file."""
 
@@ -41,6 +44,11 @@ class FileMessage(BaseChatMessage):
         if not self.filename:
             self.filename = os.path.basename(self.filepath)
 
+    @computed_field
+    def content(self) -> str:
+        """Standard content field that all message types have."""
+        return self.to_text()
+
     def to_text(self) -> str:
         return f"File: {self.filename} ({self.filetype})"
 
@@ -51,6 +59,11 @@ class FileMessage(BaseChatMessage):
         from autogen_core.models import UserMessage
 
         return UserMessage(content=self.to_model_text(), source=self.source)
+    
+    async def get_content(self) -> Any:
+        """Get the content of the file."""
+        # Base implementation returns None, override in subclasses
+        return None
 
 
 class PDFMessage(FileMessage):
@@ -94,6 +107,11 @@ class PDFMessage(FileMessage):
                 except RuntimeError:
                     # No event loop, extract synchronously
                     self.extracted_text = self._extract_text_sync()
+
+    @computed_field
+    def content(self) -> str:
+        """Standard content field that returns the extracted text."""
+        return self.extracted_text if self.extracted_text else self.to_text()
 
     def _extract_metadata(self):
         """Extract metadata from the PDF file."""
@@ -173,6 +191,12 @@ class PDFMessage(FileMessage):
         if self.extracted_text is None:
             self.extracted_text = self._extract_text_sync()
         return self.extracted_text
+    
+    async def get_content(self) -> str:
+        """Get the content of the PDF file."""
+        if self.extracted_text is None:
+            await self.extract_text()
+        return self.extracted_text
 
 
 class PDFWithOCRMessage(PDFMessage):
@@ -209,6 +233,15 @@ class PDFWithOCRMessage(PDFMessage):
             except (RuntimeError, ImportError):
                 # No event loop or missing dependencies
                 pass
+
+    @computed_field
+    def content(self) -> str:
+        """Standard content field that prioritizes OCR text if available."""
+        if self.ocr_text and not self.ocr_text.startswith("Required") and not self.ocr_text.startswith("Error"):
+            return self.ocr_text
+        elif self.extracted_text:
+            return self.extracted_text
+        return self.to_text()
 
     async def _async_apply_ocr(self):
         """Apply OCR to the PDF asynchronously."""
@@ -275,6 +308,12 @@ class PDFWithOCRMessage(PDFMessage):
         self.extracted_text = self.ocr_text
 
         return self.extracted_text
+    
+    async def get_content(self) -> str:
+        """Get the content of the PDF file with OCR."""
+        if self.ocr_applied and self.ocr_text:
+            return self.ocr_text
+        return await super().get_content()
 
 
 class JSONMessage(FileMessage):
@@ -305,13 +344,17 @@ class JSONMessage(FileMessage):
                 # Don't raise exception on initialization, defer to get_content
                 pass
 
+    @computed_field
+    def content(self) -> Any:
+        """Standard content field that returns JSON data."""
+        return self.content_data
+
     def _infer_schema(self):
         """Infer a basic schema from the content."""
         if self.content_data is None or self.schema is not None:
             return
 
         try:
-
             def get_type(value):
                 if isinstance(value, dict):
                     properties = {}
@@ -424,6 +467,22 @@ class ImageMessage(FileMessage):
             except (RuntimeError, ImportError):
                 # No event loop or missing dependencies, skip automatic OCR
                 pass
+
+    @computed_field
+    def content(self) -> Union[str, Dict[str, Any]]:
+        """Standard content field that returns OCR text if available, otherwise image metadata."""
+        if self.ocr_text and not self.ocr_text.startswith("Required") and not self.ocr_text.startswith("Error"):
+            return self.ocr_text
+        
+        # Return image metadata as content if no OCR text
+        content_dict = {
+            "image": self.filename,
+            "type": self.filetype
+        }
+        if self.width and self.height:
+            content_dict["dimensions"] = f"{self.width}x{self.height}"
+        
+        return content_dict
 
     def _extract_dimensions(self):
         """Extract dimensions from the image file."""
@@ -543,6 +602,15 @@ class ImageMessage(FileMessage):
 
         self.ocr_text = self._ocr_extract_text_sync(language)
         return self.ocr_text
+    
+    async def get_content(self) -> Union[str, Dict[str, Any]]:
+        """Get the content of the image file."""
+        # If OCR text is available, return it as the content
+        if self.ocr_text and not self.ocr_text.startswith("Required") and not self.ocr_text.startswith("Error"):
+            return self.ocr_text
+        
+        # Otherwise, return the image metadata
+        return self.content  # Use the computed field
 
 
 class ExcelMessage(FileMessage):
@@ -596,6 +664,30 @@ class ExcelMessage(FileMessage):
                     # No event loop or missing dependencies, skip automatic extraction
                     pass
 
+    @computed_field
+    def content(self) -> Dict[str, Any]:
+        """Standard content field that returns Excel data as a dictionary."""
+        if self.data_dict:
+            return self.data_dict
+        
+        # If data_dict is not available yet, return sheet info
+        content_dict = {
+            "file": self.filename,
+            "type": self.filetype
+        }
+        
+        if self.sheet_names:
+            sheets_info = {}
+            for sheet in self.sheet_names:
+                sheet_info = {}
+                if self.row_count and self.column_count:
+                    sheet_info["rows"] = self.row_count.get(sheet, 0)
+                    sheet_info["columns"] = self.column_count.get(sheet, 0)
+                sheets_info[sheet] = sheet_info
+            content_dict["sheets"] = sheets_info
+            
+        return content_dict
+
     def _extract_workbook_info(self):
         """Extract information about the workbook."""
         if not self.exists or self.sheet_names is not None:
@@ -604,8 +696,40 @@ class ExcelMessage(FileMessage):
         # Try with pandas first
         try:
             import pandas as pd
-
-            xl = pd.ExcelFile(self.filepath)
+            
+            # Determine the engine based on file extension
+            engine = None
+            file_ext = os.path.splitext(self.filepath)[1].lower()
+            
+            if file_ext in ['.xlsx', '.xlsm']:
+                engine = 'openpyxl'
+            elif file_ext == '.xls':
+                engine = 'xlrd'
+            elif file_ext == '.xlsb':
+                engine = 'pyxlsb'
+            
+            # For CSV, try using read_csv instead
+            if file_ext == '.csv':
+                df = pd.read_csv(self.filepath)
+                self.sheet_names = ['Sheet1']  # CSV files have a single sheet
+                self.row_count = {'Sheet1': len(df)}
+                self.column_count = {'Sheet1': len(df.columns)}
+                return
+            
+            # Try with the selected engine first
+            try:
+                xl = pd.ExcelFile(self.filepath, engine=engine)
+            except Exception:
+                # If initial attempt fails, try other engines
+                for alt_engine in ['openpyxl', 'xlrd', 'pyxlsb']:
+                    if alt_engine == engine:  # Skip already tried engine
+                        continue
+                    try:
+                        xl = pd.ExcelFile(self.filepath, engine=alt_engine)
+                        break  # Found a working engine
+                    except Exception:
+                        continue
+            
             self.sheet_names = xl.sheet_names
             self.row_count = {}
             self.column_count = {}
@@ -706,8 +830,42 @@ class ExcelMessage(FileMessage):
 
         try:
             import pandas as pd
-
-            xl = pd.ExcelFile(self.filepath)
+            
+            # Handle CSV files differently
+            file_ext = os.path.splitext(self.filepath)[1].lower()
+            if file_ext == '.csv':
+                df = pd.read_csv(self.filepath)
+                return {'Sheet1': df}  # Return as a single sheet
+            
+            # Determine the engine based on file extension
+            engine = None
+            if file_ext in ['.xlsx', '.xlsm']:
+                engine = 'openpyxl'
+            elif file_ext == '.xls':
+                engine = 'xlrd'
+            elif file_ext == '.xlsb':
+                engine = 'pyxlsb'
+            
+            # Try opening with the selected engine
+            try:
+                xl = pd.ExcelFile(self.filepath, engine=engine)
+            except Exception:
+                # If initial attempt fails, try other engines
+                success = False
+                for alt_engine in ['openpyxl', 'xlrd', 'pyxlsb']:
+                    if alt_engine == engine:  # Skip already tried engine
+                        continue
+                    try:
+                        xl = pd.ExcelFile(self.filepath, engine=alt_engine)
+                        success = True
+                        break  # Found a working engine
+                    except Exception:
+                        continue
+                
+                if not success:
+                    raise ValueError(f"Could not determine Excel engine for {os.path.basename(self.filepath)}. Try installing required packages (openpyxl, xlrd, pyxlsb) or specify an engine manually.")
+            
+            # Process with the working engine
             result = {}
             for sheet in xl.sheet_names:
                 result[sheet] = xl.parse(sheet)
@@ -731,6 +889,12 @@ class ExcelMessage(FileMessage):
 
         self.data_dict = result
         return result
+    
+    async def get_content(self) -> Dict[str, Any]:
+        """Get the content of the Excel file."""
+        if self.data_dict is None:
+            self.data_dict = await self.to_dict()
+        return self.data_dict
 
 
 # Register the message types with the message factory
