@@ -56,6 +56,7 @@ from aiplanet_core.types.messages import (
     JSONMessage,
     ImageMessage,
     ExcelMessage,
+    FileProcessingEvent,
     register_file_message_types
 )
 
@@ -339,6 +340,7 @@ Always be specific about what you find in the files and cite the source when ans
             JSONMessage,
             ImageMessage,
             ExcelMessage,
+            FileProcessingEvent
         ]
         
         if self._tools:
@@ -395,7 +397,12 @@ Always be specific about what you find in the files and cite the source when ans
         for msg in messages:
             # Process file messages
             if isinstance(msg, (FileMessage, PDFMessage, PDFWithOCRMessage, JSONMessage, ImageMessage, ExcelMessage)):
-                extracted_info = await self._process_file_message(msg)
+                extracted_info, processing_events = await self._process_file_message(msg)
+                # Yield each file processing event
+                for event in processing_events:
+                    inner_messages.append(event)
+                    yield event
+    
                 if extracted_info:
                     extracted_content.append(extracted_info)
                     # Add the file to processed files list if not already there
@@ -566,46 +573,124 @@ Always be specific about what you find in the files and cite the source when ans
                     events.append(memory_query_event_msg)
         return events
 
-    async def _process_file_message(self, msg: BaseChatMessage) -> str:
-        """Process a file message and extract its content."""
-        # Check for custom handler based on file extension and mime type
-        if hasattr(msg, 'filepath') and hasattr(msg, 'filetype'):
-            file_ext = os.path.splitext(msg.filepath)[1].lower().lstrip('.')
-            mime_type = getattr(msg, 'filetype', '')
+    async def _process_file_message(self, msg: BaseChatMessage) -> tuple[str, List[FileProcessingEvent]]:
+        """Process a file message and extract its content, yielding progress events."""
+        events: List[FileProcessingEvent] = []
+        result = ""
+        
+        # Initialize a processing event
+        if hasattr(msg, 'filename') and hasattr(msg, 'filetype'):
+            filename = getattr(msg, 'filename', 'unknown file')
+            filetype = getattr(msg, 'filetype', 'unknown')
             
-            # Check if we have a custom handler for this file type
-            handler_name = None
-            if file_ext in self._file_handlers:
-                handler_name = self._file_handlers[file_ext]
-            elif mime_type in self._file_handlers:
-                handler_name = self._file_handlers[mime_type]
+            # Create and add the initial event
+            start_event = FileProcessingEvent(
+                source=self.name,
+                filename=filename,
+                operation=f"processing {filetype} file",
+                status="started",
+                content=f"Extract content from File: {self.name}"
+            )
+            events.append(start_event)
             
-            # If we have a handler, use it
-            if handler_name and hasattr(self, handler_name):
-                handler = getattr(self, handler_name)
-                return await handler(msg)
-        # Check if the message has a content property using the new consistent interface
-        if hasattr(msg, 'content'):
-            if isinstance(msg, PDFMessage):
-                return await self._process_pdf_message(msg)
-            elif isinstance(msg, PDFWithOCRMessage):
-                return await self._process_pdf_ocr_message(msg)
-            elif isinstance(msg, JSONMessage):
-                return await self._process_json_message(msg)
-            elif isinstance(msg, ImageMessage):
-                return await self._process_image_message(msg)
-            elif isinstance(msg, ExcelMessage):
-                return await self._process_excel_message(msg)
-            elif isinstance(msg, FileMessage):
-                return f"File received: {msg.filename} (type: {msg.filetype})"
+            # Check for custom handler based on file extension and mime type
+            if hasattr(msg, 'filepath'):
+                file_ext = os.path.splitext(msg.filepath)[1].lower().lstrip('.')
+                mime_type = getattr(msg, 'filetype', '')
+                
+                # Check if we have a custom handler for this file type
+                handler_name = None
+                if file_ext in self._file_handlers:
+                    handler_name = self._file_handlers[file_ext]
+                elif mime_type in self._file_handlers:
+                    handler_name = self._file_handlers[mime_type]
+                
+                # If we have a handler, use it
+                if handler_name and hasattr(self, handler_name):
+                    handler = getattr(self, handler_name)
+                    try:
+                        # Call the handler and collect its output
+                        result = await handler(msg)
+                        
+                        # Create a completion event
+                        complete_event = FileProcessingEvent(
+                            source=self.name,
+                            filename=filename,
+                            operation=f"processing {filetype} file",
+                            status="completed",
+                            content=f"Extract content from File: {self.name}"
+                        )
+                        events.append(complete_event)
+                    except Exception as e:
+                        # Create a failure event
+                        fail_event = FileProcessingEvent(
+                            source=self.name,
+                            filename=filename,
+                            operation=f"processing {filetype} file",
+                            status="failed",
+                            content=str(e)
+                        )
+                        events.append(fail_event)
+                        result = f"Error processing {filename}: {str(e)}"
             
-        return ""
+            # Process specific file types
+            if result == "" and hasattr(msg, 'content'):
+                if isinstance(msg, PDFMessage):
+                    result, pdf_events = await self._process_pdf_message(msg)
+                    events.extend(pdf_events)
+                elif isinstance(msg, PDFWithOCRMessage):
+                    result, pdf_ocr_events = await self._process_pdf_ocr_message(msg)
+                    events.extend(pdf_ocr_events)
+                elif isinstance(msg, JSONMessage):
+                    result, json_events = await self._process_json_message(msg)
+                    events.extend(json_events)
+                elif isinstance(msg, ImageMessage):
+                    result, image_events = await self._process_image_message(msg)
+                    events.extend(image_events)
+                elif isinstance(msg, ExcelMessage):
+                    result, excel_events = await self._process_excel_message(msg)
+                    events.extend(excel_events)
+                elif isinstance(msg, FileMessage):
+                    result = f"File received: {msg.filename} (type: {msg.filetype})"
+                    # Just create a completion event since this is a simple operation
+                    complete_event = FileProcessingEvent(
+                        source=self.name,
+                        filename=filename,
+                        operation="receiving file",
+                        status="completed"
+                    )
+                    events.append(complete_event)
+        
+        return result, events
 
-    async def _process_pdf_message(self, msg: PDFMessage) -> str:
+    async def _process_pdf_message(self, msg: PDFMessage) -> tuple[str, List[FileProcessingEvent]]:
         """Process a PDF message."""
+        events = []
         try:
+            # Create a processing event
+            start_event = FileProcessingEvent(
+                source=self.name,
+                filename=msg.filename,
+                operation="extracting text from PDF",
+                status="started",
+                content=f"Extract content from File: {self.name}"
+            )
+            events.append(start_event)
+            
             # Use the get_content method to ensure we have text content
             text = await msg.get_content()
+            
+            # Update with progress event for long PDFs
+            if msg.page_count and msg.page_count > 10:
+                progress_event = FileProcessingEvent(
+                    source=self.name,
+                    filename=msg.filename,
+                    operation="extracting text from PDF",
+                    status="in_progress",
+                    progress=0.5,
+                    content=f"Processing {msg.page_count} pages"
+                )
+                events.append(progress_event)
             
             meta_info = f"PDF: {msg.filename}"
             if msg.page_count:
@@ -619,15 +704,53 @@ Always be specific about what you find in the files and cite the source when ans
             if isinstance(text, str) and len(text) > 8000 and self._extraction_depth < 3:
                 text = text[:8000] + "...[truncated]"
                 
-            return f"{meta_info}\n\n{text}"
+            # Create completion event
+            complete_event = FileProcessingEvent(
+                source=self.name,
+                filename=msg.filename,
+                operation="extracting text from PDF",
+                status="completed",
+                content=f"Extracted {len(text) if isinstance(text, str) else 'N/A'} characters"
+            )
+            events.append(complete_event)
+                
+            return f"{meta_info}\n\n{text}", events
         except Exception as e:
-            return f"Error processing PDF {msg.filename}: {str(e)}"
+            # Create failure event
+            fail_event = FileProcessingEvent(
+                source=self.name,
+                filename=msg.filename,
+                operation="extracting text from PDF",
+                status="failed",
+                content=str(e)
+            )
+            events.append(fail_event)
+            return f"Error processing PDF {msg.filename}: {str(e)}", events
 
     async def _process_pdf_ocr_message(self, msg: PDFWithOCRMessage) -> str:
         """Process a PDF with OCR message."""
+        events = []
         try:
+            # Create a processing event
+            start_event = FileProcessingEvent(
+                source=self.name,
+                filename=msg.filename,
+                operation="extracting text from PDF",
+                status="started",
+                content=f"Extract content from File: {self.name}"
+            )
+            events.append(start_event)
             # Use get_content which will prioritize OCR text if available
             text = await msg.get_content()
+            # Create completion event
+            complete_event = FileProcessingEvent(
+                source=self.name,
+                filename=msg.filename,
+                operation="extracting text from PDF",
+                status="completed",
+                content=f"Extracted {len(text) if isinstance(text, str) else 'N/A'} characters"
+            )
+            events.append(complete_event)
                 
             meta_info = f"PDF with OCR: {msg.filename}"
             if msg.page_count:
@@ -637,30 +760,88 @@ Always be specific about what you find in the files and cite the source when ans
             if isinstance(text, str) and len(text) > 8000 and self._extraction_depth < 3:
                 text = text[:8000] + "...[truncated]"
                 
-            return f"{meta_info}\n\n{text}"
+            return f"{meta_info}\n\n{text}", events
         except Exception as e:
-            return f"Error processing PDF with OCR {msg.filename}: {str(e)}"
+            # Create failure event
+            fail_event = FileProcessingEvent(
+                source=self.name,
+                filename=msg.filename,
+                operation="extracting text from PDF",
+                status="failed",
+                content=str(e)
+            )
+            events.append(fail_event)
+            return f"Error processing PDF with OCR {msg.filename}: {str(e)}", events
 
     async def _process_json_message(self, msg: JSONMessage) -> str:
         """Process a JSON message."""
+        events = []
         try:
+            # Create a processing event
+            start_event = FileProcessingEvent(
+                source=self.name,
+                filename=msg.filename,
+                operation="extracting text from JSON",
+                status="started",
+                content=f"Extract content from File: {self.name}"
+            )
+            events.append(start_event)
             # Use get_content which returns the parsed JSON data
             content = await msg.get_content()
             
             # Format JSON content as a string
             formatted_content = json.dumps(content, indent=2)
             
+            if formatted_content is not None:
+                progress_event = FileProcessingEvent(
+                    source=self.name,
+                    filename=msg.filename,
+                    operation="extracting text from JSON",
+                    status="in_progress",
+                    progress=0.5,
+                    content=f"Processing {msg.filetype} file"
+                )
+                events.append(progress_event)
             # For large JSON files, truncate based on extraction depth
             if len(formatted_content) > 5000 and self._extraction_depth < 2:
                 formatted_content = formatted_content[:5000] + "...[truncated]"
+
+            # Create completion event
+            complete_event = FileProcessingEvent(
+                source=self.name,
+                filename=msg.filename,
+                operation="extracting text from JSON",
+                status="completed",
+                content=f"Extracted {len(formatted_content) if isinstance(formatted_content, str) else 'N/A'} characters"
+            )
+            events.append(complete_event)
                 
-            return f"JSON File: {msg.filename}\n\n{formatted_content}"
+            return f"JSON File: {msg.filename}\n\n{formatted_content}", events
         except Exception as e:
-            return f"Error processing JSON {msg.filename}: {str(e)}"
+            # Create failure event
+            fail_event = FileProcessingEvent(
+                source=self.name,
+                filename=msg.filename,
+                operation="extracting text from JSON",
+                status="failed",
+                content=str(e)
+            )
+            events.append(fail_event)
+            return f"Error processing JSON {msg.filename}: {str(e)}", events
 
     async def _process_image_message(self, msg: ImageMessage) -> str:
         """Process an image message."""
+        events = []
         try:
+            # Create a processing event
+            start_event = FileProcessingEvent(
+                source=self.name,
+                filename=msg.filename,
+                operation="extracting info from Image",
+                status="started",
+                content=f"Extract content from File: {self.name}"
+            )
+            events.append(start_event)
             # Use get_content which will return OCR text if available
             content = await msg.get_content()
             
@@ -670,18 +851,47 @@ Always be specific about what you find in the files and cite the source when ans
                 
             # If content is a string (OCR text)
             if isinstance(content, str) and content and not content.startswith("Error") and not content.startswith("Required"):
-                return f"{meta_info}\n\nText content:\n{content}"
+                # Create completion event
+                complete_event = FileProcessingEvent(
+                    source=self.name,
+                    filename=msg.filename,
+                    operation="extracting text from JSON",
+                    status="completed",
+                    content=f"Extracted {len(content) if isinstance(content, str) else 'N/A'} characters"
+                )
+                events.append(complete_event)
+                return f"{meta_info}\n\nText content:\n{content}", events
             elif isinstance(content, dict):
+                # Create completion event
+                complete_event = FileProcessingEvent(
+                    source=self.name,
+                    filename=msg.filename,
+                    operation="extracting text from JSON",
+                    status="completed",
+                    content=f"Extracted {len(content) if isinstance(content, str) else 'N/A'} characters"
+                )
+                events.append(complete_event)
                 # If content is a dictionary (image metadata)
-                return f"{meta_info}"
+                return f"{meta_info}", events
                     
-            return meta_info
+            return meta_info, events
         except Exception as e:
             return f"Error processing image {msg.filename}: {str(e)}"
 
     async def _process_excel_message(self, msg: ExcelMessage) -> str:
         """Process an Excel message."""
+        events = []
         try:
+            # Create a processing event
+            start_event = FileProcessingEvent(
+                source=self.name,
+                filename=msg.filename,
+                operation="extracting text from Excel",
+                status="started",
+                content=f"Extract content from File: {self.name}"
+
+            )
+            events.append(start_event)
             # Use get_content to get the Excel data as a dictionary
             content = await msg.get_content()
             
@@ -708,12 +918,31 @@ Always be specific about what you find in the files and cite the source when ans
                 # Truncate for very large Excel files
                 if len(formatted_data) > 6000 and self._extraction_depth < 3:
                     formatted_data = formatted_data[:6000] + "...[truncated]"
+
+                # Create completion event
+                complete_event = FileProcessingEvent(
+                    source=self.name,
+                    filename=msg.filename,
+                    operation="extracting text from Excel",
+                    status="completed",
+                    content=f"Extracted {len(formatted_data) if isinstance(formatted_data, str) else 'N/A'} characters"
+                )
+                events.append(complete_event)
                     
-                return f"{meta_info}\n\n{formatted_data}"
+                return f"{meta_info}\n\n{formatted_data}", events
             
-            return meta_info
+            return meta_info, events
         except Exception as e:
-            return f"Error processing Excel file {msg.filename}: {str(e)}"
+            # Create failure event
+            fail_event = FileProcessingEvent(
+                source=self.name,
+                filename=msg.filename,
+                operation="extracting text from JSON",
+                status="failed",
+                content=str(e)
+            )
+            events.append(fail_event)
+            return f"Error processing excel {msg.filename}: {str(e)}", events
 
     @classmethod
     async def _call_llm(

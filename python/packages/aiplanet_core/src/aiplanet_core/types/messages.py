@@ -9,7 +9,7 @@ import json
 import os
 from typing import Any, Dict, List, Literal, Optional, Union, Mapping
 
-from autogen_agentchat.messages import BaseChatMessage, MessageFactory
+from autogen_agentchat.messages import BaseChatMessage, MessageFactory, BaseAgentEvent
 from autogen_core import Image
 from pydantic import BaseModel, Field, computed_field
 
@@ -65,7 +65,43 @@ class FileMessage(BaseChatMessage):
         # Base implementation returns None, override in subclasses
         return None
 
+class FileProcessingEvent(BaseAgentEvent):
+    """An event signaling file processing activities."""
 
+    filename: str
+    """The name of the file being processed."""
+
+    operation: str
+    """The type of operation being performed (e.g., 'extracting', 'ocr', 'loading')."""
+
+    status: Literal["started", "in_progress", "completed", "failed"] = "in_progress"
+    """The current status of the file processing operation."""
+
+    progress: float | None = None
+    """Optional progress indicator (0.0 to 1.0) for long-running operations."""
+
+    content: str | None = None
+    """Additional details about the processing operation."""
+
+    type: Literal["FileProcessingEvent"] = "FileProcessingEvent"
+
+    def to_text(self) -> str:
+        """Convert the event to a human-readable string."""
+        status_text = {
+            "started": "Starting",
+            "in_progress": "Processing",
+            "completed": "Completed processing",
+            "failed": "Failed processing"
+        }[self.status]
+        
+        message = f"{status_text} {self.operation} for file: {self.filename}"
+        if self.progress is not None:
+            message += f" ({int(self.progress * 100)}%)"
+        if self.details:
+            message += f"\nDetails: {self.details}"
+        return message
+
+    
 class PDFMessage(FileMessage):
     """Message type for PDF files."""
 
@@ -312,8 +348,8 @@ class PDFWithOCRMessage(PDFMessage):
     async def get_content(self) -> str:
         """Get the content of the PDF file with OCR."""
         if self.ocr_applied and self.ocr_text:
-            return self.ocr_text
-        return await super().get_content()
+            await self.extract_text()
+        return self.extracted_text
 
 
 class JSONMessage(FileMessage):
@@ -906,3 +942,4 @@ def register_file_message_types(factory: MessageFactory) -> None:
     factory.register(JSONMessage)
     factory.register(ImageMessage)
     factory.register(ExcelMessage)
+    factory.register(FileProcessingEvent)
