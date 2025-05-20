@@ -568,6 +568,22 @@ Always be specific about what you find in the files and cite the source when ans
 
     async def _process_file_message(self, msg: BaseChatMessage) -> str:
         """Process a file message and extract its content."""
+        # Check for custom handler based on file extension and mime type
+        if hasattr(msg, 'filepath') and hasattr(msg, 'filetype'):
+            file_ext = os.path.splitext(msg.filepath)[1].lower().lstrip('.')
+            mime_type = getattr(msg, 'filetype', '')
+            
+            # Check if we have a custom handler for this file type
+            handler_name = None
+            if file_ext in self._file_handlers:
+                handler_name = self._file_handlers[file_ext]
+            elif mime_type in self._file_handlers:
+                handler_name = self._file_handlers[mime_type]
+            
+            # If we have a handler, use it
+            if handler_name and hasattr(self, handler_name):
+                handler = getattr(self, handler_name)
+                return await handler(msg)
         # Check if the message has a content property using the new consistent interface
         if hasattr(msg, 'content'):
             if isinstance(msg, PDFMessage):
