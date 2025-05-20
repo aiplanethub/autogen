@@ -70,6 +70,16 @@ class Settings(BaseSettings):
     WEAVIATE_GRPC_HOST: str = ""
     WEAVIATE_HTTP_PORT: int = 443
 
+    # S3 creds
+    AWS_ACCESS_KEY_ID: str
+    AWS_SECRET_ACCESS_KEY: str
+    AWS_BUCKET_NAME: str
+    AWS_DEFAULT_REGION: str
+    AWS_ENDPOINT_URL: str
+
+    # Llama parse creds
+    LLAMA_CLOUD_API_KEY: str
+
     # Pydantic v2 uses model_config instead of Config class
     model_config = SettingsConfigDict(
         env_file=os.path.join(os.path.dirname(__file__), ".env"),

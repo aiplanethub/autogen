@@ -1,20 +1,34 @@
-# api/routes/teams.py
+import json
 from typing import Dict
 
-from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, Form, File
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Response,
+    UploadFile,
+    Form,
+    File,
+    WebSocket,
+    WebSocketDisconnect,
+)
 
 from ...datamodel import Team, Gallery
 from ...gallery.builder import create_default_gallery
 from ..deps import get_db
 from autogenstudio.planner.orchestrator import planner_orchestrator
+from autogenstudio.planner.queue_userproxy import QueueUserProxyAgent
 from autogen_ext.models.openai import AzureOpenAIChatCompletionClient
-from autogen_agentchat.agents import AssistantAgent, UserProxyAgent
+from autogen_agentchat.agents import AssistantAgent
 from autogenstudio.utils.constants import PLANNER_PROMPT
 import traceback
 from autogenstudio.planner.clarification_agent import ClarificationAgent
 from autogenstudio.core.config import get_settings
+import asyncio
 
 router = APIRouter()
+
+builder_queues: Dict[int, asyncio.Queue] = {}
 
 
 @router.get("/")
@@ -54,7 +68,7 @@ async def create_team(team: Team, db=Depends(get_db)) -> Dict:
 
 @router.post("/plan")
 async def plan_team(
-    user_id: str = Form(...),
+    gallery_id: int = Form(...),
     prompt: str = Form(...),
     knowledge_base: str = Form(...),
     file: UploadFile = File(None),
@@ -62,15 +76,13 @@ async def plan_team(
 ) -> Dict:
     try:
         settings = get_settings()
-        result = db.get(Gallery, filters={"user_id": user_id})
+        result = db.get(Gallery, filters={"id": gallery_id})
         if not result.data or len(result.data) == 0:
             # create a default gallery entry
             gallery_config = create_default_gallery()
-            default_gallery = Gallery(
-                user_id=user_id, config=gallery_config.model_dump()
-            )
+            default_gallery = Gallery(id=gallery_id, config=gallery_config.model_dump())
             db.upsert(default_gallery)
-            result = db.get(Gallery, filters={"user_id": user_id})
+            result = db.get(Gallery, filters={"id": gallery_id})
 
         tools = result.data[0].config["components"]["tools"]
         planner_system_message = PLANNER_PROMPT.format(
@@ -103,25 +115,56 @@ async def plan_team(
             kb_collection_name=knowledge_base,
         )
 
-        user_proxy_agent = UserProxyAgent("user_proxy")
+        user_proxy_agent = QueueUserProxyAgent("user_proxy", gallery_id, builder_queues)
 
         selector_gc = planner_orchestrator(
             model_client=model_client,
-            agents=[planner_agent, clarification_agent],
+            agents=[user_proxy_agent, planner_agent, clarification_agent],
         )
-        result = await selector_gc.run(task=prompt)
+
+        task = asyncio.create_task(selector_gc.run_stream(task=prompt))
+
         return {
             "status": True,
             "data": {
-                "response": result.messages[-1].content.dict(),
-                "agents": [
-                    agent.model_dump() for agent in selector_gc._participant_names
-                ],
+                "response": "Conversation started, waiting for user input via WebSocket",
+                "agents": selector_gc._participant_names,
+                "gallery_id": gallery_id,
             },
         }
     except Exception as e:
         print(f"Error in planning: {str(e)} {traceback.format_exc()}")
         return Response(status=False, data=[], message=f"Error in planning: {str(e)}")
+
+
+@router.websocket("/ws/{builder_id}")
+async def websocket_endpoint(websocket: WebSocket, builder_id: int):
+    await websocket.accept()
+
+    try:
+        if builder_id not in builder_queues:
+            builder_queues[builder_id] = asyncio.Queue(maxsize=1)
+
+        # Send initial connection message
+        await websocket.send_json({"status": "connected", "builder_id": builder_id})
+
+        while True:
+            data = await websocket.receive_text()
+            message = json.loads(data)
+
+            if not builder_queues[builder_id].full():
+                await builder_queues[builder_id].put(message["message"])
+                await websocket.send_json({"status": "message_received"})
+            else:
+                await websocket.send_json(
+                    {"status": "error", "message": "Queue full, wait for processing"}
+                )
+
+    except WebSocketDisconnect:
+        print(f"Client disconnected for builder_id: {builder_id}")
+    except Exception as e:
+        print(f"Error in WebSocket: {str(e)} {traceback.format_exc()}")
+        await websocket.send_json({"status": "error", "message": str(e)})
 
 
 @router.delete("/{team_id}")
