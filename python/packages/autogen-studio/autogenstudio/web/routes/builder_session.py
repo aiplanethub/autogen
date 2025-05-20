@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, Form, HTTPException, status
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 
 from ...database import DatabaseManager
+from ...datamodel import BuilderSession
 from ...datamodel.types import Response
 from ...services.builder import BuilderService
 from ..deps import get_current_user, get_db
@@ -23,7 +24,45 @@ def create_session(
         response = service.save(user_id=user_id)
 
         return JSONResponse(
-            content=response.model_dump(), status_code=status.HTTP_201_CREATED
+            content={
+                "id": response.id,
+                "name": response.name,
+                "summary": response.summary,
+                "config": response.workflow_config,
+                "created_at": str(response.created_at),
+            },
+            status_code=status.HTTP_201_CREATED,
+        )
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
+
+
+@router.get("/")
+def get_builder(builder_id: str = Query(...), db: DatabaseManager = Depends(get_db)):
+    try:
+        service = BuilderService(db)
+        builder = service.get_session(builder_id)
+        if not builder:
+            raise HTTPException(
+                status_code=status.HTTP_204_NO_CONTENT, detail="Session not found"
+            )
+        return Response(
+            data={
+                "id": builder.id,
+                "name": builder.name,
+                "summary": builder.summary,
+                "config": builder.workflow_config,
+                "created_at": str(builder.created_at),
+            },
+            status=True,
+            message="Builder fetched successfully",
         )
 
     except HTTPException:
@@ -35,20 +74,27 @@ def create_session(
         )
 
 
-@router.get("/")
-def get_builder(
-    user_id: str = Depends(get_current_user), db: DatabaseManager = Depends(get_db)
-):
+@router.get("/list")
+def get_builder(user_id: str = Query(...), db: DatabaseManager = Depends(get_db)):
     try:
         service = BuilderService(db)
-        builder = service.get_session(user_id)
-        if not builder:
+        builders = service.list_sessions(user_id)
+        if not builders:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+                status_code=status.HTTP_204_NO_CONTENT,
+                detail="No sessions found for this user",
             )
-
         return Response(
-            data=builder.model_dump(),
+            data=[
+                {
+                    "id": builder.id,
+                    "name": builder.name,
+                    "summary": builder.summary,
+                    "config": builder.workflow_config,
+                    "created_at": str(builder.created_at),
+                }
+                for builder in builders
+            ],
             status=True,
             message="Builder fetched successfully",
         )
@@ -63,9 +109,7 @@ def get_builder(
 
 
 @router.get("/workflow")
-def get_config(
-    user_id: str = Depends(get_current_user), db: DatabaseManager = Depends(get_db)
-):
+def get_config(user_id: str = Query(...), db: DatabaseManager = Depends(get_db)):
     try:
         service = BuilderService(db)
         config = service.get_workflow_config(user_id)
@@ -89,7 +133,7 @@ def get_config(
 
 @router.get("/config")
 def get_config_selection(
-    user_id: str = Depends(get_current_user), db: DatabaseManager = Depends(get_db)
+    user_id: str = Query(...), db: DatabaseManager = Depends(get_db)
 ):
     try:
         service = BuilderService(db)
@@ -113,9 +157,7 @@ def get_config_selection(
 
 
 @router.get("/messages")
-def get_messages(
-    user_id: str = Depends(get_current_user), db: DatabaseManager = Depends(get_db)
-):
+def get_messages(user_id: str = Query(...), db: DatabaseManager = Depends(get_db)):
     try:
         service = BuilderService(db)
         messages = service.get_messages(user_id)
@@ -189,6 +231,7 @@ def update(
         raise
 
     except Exception as e:
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
         )
@@ -206,6 +249,7 @@ def delete_session(session_id: int = Form(...), db: DatabaseManager = Depends(ge
         raise
 
     except Exception as e:
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
         )

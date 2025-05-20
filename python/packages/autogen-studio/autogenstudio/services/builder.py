@@ -57,11 +57,11 @@ class BuilderService:
 
     def save(
         self,
-        id: Optional[int],
-        name: Optional[str],
-        workflow_config: Optional[dict],
-        user_id: Optional[str],
-        is_active: Optional[bool],
+        id: Optional[int] = None,
+        name: Optional[str] = None,
+        workflow_config: Optional[dict] = None,
+        user_id: Optional[str] = None,
+        is_active: Optional[bool] = True,
     ) -> BuilderSession:
         session = BuilderSession(
             id=id,
@@ -83,16 +83,21 @@ class BuilderService:
         if not response.status:
             raise Exception(response.message)
 
-    def get_session(self, user_id: str) -> BuilderSession | None:
+    def list_sessions(self, user_id: str) -> list[BuilderSession] | None:
         filters = {"user_id": user_id, "is_active": True}
         response = self.db.get(BuilderSession, filters)
-        if response.status and len(response.data) != 0:
+        if response.status:
             return response.data
 
-        if len(response.data == 0):
-            return None
+        return None
 
-        raise Exception(response.message)
+    def get_session(self, builder_id: str) -> BuilderSession | None:
+        filters = {"id": builder_id, "is_active": True}
+        response = self.db.get(BuilderSession, filters)
+        if response.status and len(response.data) != 0:
+            return response.data[0]
+
+        return None
 
     def get_messages(self, user_id: str):
         session = self.get_session(user_id)
