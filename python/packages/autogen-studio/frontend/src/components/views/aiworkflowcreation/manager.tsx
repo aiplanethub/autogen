@@ -1,15 +1,16 @@
-import React, { useEffect, useState } from "react";
+import React, { useContext, useEffect, useState } from "react";
 import Assistant from "./chat/Assistant";
 import AIWorkflowCreationSidebar from "./SideBar";
-import {
-  IAIWorkflowCreationKB,
-  IAIWorkflowCreationSession,
-} from "../../types/aiworkflowcreation";
+import { IAIWorkflowCreationSession } from "../../types/aiworkflowcreation";
 import { message } from "antd";
 import CreateSessionModal from "./CreateSessionModal";
 import Icon from "../../Icon";
+import { aiWorkflowCreationAPI } from "./api";
+import { appContext } from "../../../hooks/provider";
 
 const AIWorkflowCreationManager = () => {
+  const { user } = useContext(appContext);
+  const [isLoading, setIsLoading] = useState(false);
   const [isSessionCreateModalOpen, setIsSessionCreateModalOpen] =
     useState(false);
   const [messageApi, contextHolder] = message.useMessage();
@@ -46,61 +47,18 @@ const AIWorkflowCreationManager = () => {
   }, [currentSession?.id]);
 
   useEffect(() => {
-    const fetchSession = () => {
-      const data: Array<IAIWorkflowCreationSession> = [
-        {
-          id: 1,
-          name: "User Proxy Session",
-          knowledgebase: {
-            id: "userproxysession",
-            name: "UserProxySessionKB",
-          },
-        },
-        {
-          id: 2,
-          name: "Assistant Agent Session",
-          knowledgebase: {
-            id: "assistantagentsession",
-            name: "AssistantAgentSessionKB",
-          },
-        },
-        {
-          id: 3,
-          name: "Web Agent Session",
-          knowledgebase: {
-            id: "webagentsession",
-            name: "WebAgentSessionKB",
-          },
-        },
-      ];
-      setSessions(data);
+    const fetchSession = async () => {
+      if (!user?.id) return;
+      try {
+        setIsLoading(true);
+        const data = await aiWorkflowCreationAPI.listAIWorkflowCreationSessions(
+          user?.id
+        );
 
-      const params = new URLSearchParams(window.location.search);
-      const sessionId = params.get("sessionId");
-
-      if (data.length > 0) {
-        if (sessionId === null && currentSession === null) {
-          setCurrentSession(data[0]);
-          window.history.pushState(
-            {},
-            "",
-            `?sessionId=${data[0].id.toString()}`
-          );
-        }
-
-        if (!!sessionId && currentSession === null) {
-          const matchedSession = data.find(
-            (session) => session.id === parseInt(sessionId)
-          );
-          if (!!matchedSession) {
-            setCurrentSession(matchedSession);
-            window.history.pushState(
-              {},
-              "",
-              `?sessionId=${matchedSession.id.toString()}`
-            );
-          } else {
-            message.error("Invalid sessionId");
+        if (data.length > 0) {
+          const params = new URLSearchParams(window.location.search);
+          const sessionId = params.get("sessionId");
+          if (sessionId === null && currentSession === null) {
             setCurrentSession(data[0]);
             window.history.pushState(
               {},
@@ -108,7 +66,31 @@ const AIWorkflowCreationManager = () => {
               `?sessionId=${data[0].id.toString()}`
             );
           }
+
+          if (!!sessionId && currentSession === null) {
+            const matchedSession = data.find(
+              (session) => session.id === sessionId
+            );
+            if (!!matchedSession) {
+              setCurrentSession(matchedSession);
+              window.history.pushState(
+                {},
+                "",
+                `?sessionId=${matchedSession.id}`
+              );
+            } else {
+              message.error("Invalid sessionId");
+              setCurrentSession(data[0]);
+              window.history.pushState({}, "", `?sessionId=${data[0].id}`);
+            }
+          }
         }
+        setSessions(data);
+      } catch (error) {
+        console.error("Error fetching ai workflow creation sessions:", error);
+        messageApi.error("Failed to fetch ai workflow creation sessions");
+      } finally {
+        setIsLoading(false);
       }
     };
     fetchSession();
@@ -122,7 +104,7 @@ const AIWorkflowCreationManager = () => {
     setIsSessionCreateModalOpen(true);
   };
 
-  const onDeleteSession = (sessionId: number) => {
+  const onDeleteSession = (sessionId: string) => {
     const filteredSessions = sessions.filter(
       (session) => session.id !== sessionId
     );
@@ -138,69 +120,84 @@ const AIWorkflowCreationManager = () => {
     message.success("Session deleted successfully.");
   };
 
-  const onSaveSession = (
-    sessionName: string,
-    knowledgeBase: IAIWorkflowCreationKB
-  ) => {
-    const session = {
-      id: sessions.length + 1,
-      name: sessionName,
-      knowledgebase: knowledgeBase,
-    };
-    setSessions([...sessions, session]);
-    setCurrentSession(session);
-    window.history.pushState({}, "", `?sessionId=${session.id.toString()}`);
-    message.success("Session created successfully.");
+  const onSaveSession = async (sessionName: string) => {
+    if (!user?.id) return;
+    try {
+      const session =
+        await aiWorkflowCreationAPI.createAIWorkflowCreationSession(
+          { name: sessionName },
+          user.id
+        );
+      setSessions([session, ...sessions]);
+      setCurrentSession(session);
+      window.history.pushState({}, "", `?sessionId=${session.id}`);
+      message.success("Session created successfully.");
+    } catch (error) {
+      console.error("Error creating ai workflow creation sessions:", error);
+      messageApi.error("Failed to create ai workflow creation session");
+    }
   };
 
   return (
     <div className="relative flex h-full w-full">
       {contextHolder}
-      {/* Sidebar */}
-      <div
-        className={`absolute left-0 top-0 h-full transition-all duration-200 ease-in-out ${
-          isSidebarOpen ? "w-64" : "w-12"
-        }`}
-      >
-        <AIWorkflowCreationSidebar
-          isOpen={isSidebarOpen}
-          sessions={sessions}
-          currentSession={currentSession}
-          onToggle={() => setIsSidebarOpen(!isSidebarOpen)}
-          onSelectSession={onSelectSession}
-          onCreateSession={onCreateSession}
-          onDeleteSession={onDeleteSession}
-        />
-      </div>
-
-      {/* Main Content */}
-      <div
-        className={`flex-1 transition-all -mr-6 duration-200 ${
-          isSidebarOpen ? "ml-64" : "ml-12"
-        }`}
-      >
-        <div className="px-4 py-2 w-full h-full">
-          {/* Breadcrumb */}
-          <div className="flex items-center gap-2 text-sm">
-            <span className="text-primary font-medium">Sessions</span>
-            {currentSession && (
-              <>
-                <Icon name="chevronright" className="w-4 h-4 text-secondary" />
-                <span className="text-secondary">{currentSession.name}</span>
-              </>
-            )}
-          </div>
-
-          {/* Content Area */}
-          {sessions.length === 0 && currentSession === null ? (
-            <div className="flex items-center justify-center h-[calc(100vh-120px)] text-secondary">
-              Select a session from the sidebar or create a new one
-            </div>
-          ) : (
-            <Assistant />
-          )}
+      {isLoading ? (
+        <div className="h-full w-full flex justify-center items-center">
+          Loading
         </div>
-      </div>
+      ) : (
+        <>
+          {/* Sidebar */}
+          <div
+            className={`absolute left-0 top-0 h-full transition-all duration-200 ease-in-out ${
+              isSidebarOpen ? "w-64" : "w-12"
+            }`}
+          >
+            <AIWorkflowCreationSidebar
+              isOpen={isSidebarOpen}
+              sessions={sessions}
+              currentSession={currentSession}
+              onToggle={() => setIsSidebarOpen(!isSidebarOpen)}
+              onSelectSession={onSelectSession}
+              onCreateSession={onCreateSession}
+              onDeleteSession={onDeleteSession}
+            />
+          </div>
+          {/* Main Content */}
+          <div
+            className={`flex-1 transition-all -mr-6 duration-200 ${
+              isSidebarOpen ? "ml-64" : "ml-12"
+            }`}
+          >
+            <div className="px-4 py-2 w-full h-full">
+              {/* Breadcrumb */}
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-primary font-medium">Sessions</span>
+                {currentSession && (
+                  <>
+                    <Icon
+                      name="chevronright"
+                      className="w-4 h-4 text-secondary"
+                    />
+                    <span className="text-secondary">
+                      {currentSession.name}
+                    </span>
+                  </>
+                )}
+              </div>
+
+              {/* Content Area */}
+              {sessions.length === 0 && currentSession === null ? (
+                <div className="flex items-center justify-center h-[calc(100vh-120px)] text-secondary">
+                  Select a session from the sidebar or create a new one
+                </div>
+              ) : (
+                <Assistant />
+              )}
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Create Session Modal */}
       {isSessionCreateModalOpen && (
