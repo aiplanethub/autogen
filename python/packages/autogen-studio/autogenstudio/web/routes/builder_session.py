@@ -15,13 +15,12 @@ router = APIRouter(
 
 @router.post("/")
 def create_session(
-    config: dict = Form(..., description="Workflow Config"),
     user_id: str = Depends(get_current_user),
     db: DatabaseManager = Depends(get_db),
 ):
     try:
         service = BuilderService(db)
-        response = service.save(config, user_id)
+        response = service.save(user_id=user_id)
 
         return JSONResponse(
             content=response.model_dump(), status_code=status.HTTP_201_CREATED
@@ -36,7 +35,34 @@ def create_session(
         )
 
 
-@router.get("/workflow-config")
+@router.get("/")
+def get_builder(
+    user_id: str = Depends(get_current_user), db: DatabaseManager = Depends(get_db)
+):
+    try:
+        service = BuilderService(db)
+        builder = service.get_session(user_id)
+        if not builder:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+            )
+
+        return Response(
+            data=builder.model_dump(),
+            status=True,
+            message="Builder fetched successfully",
+        )
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
+
+
+@router.get("/workflow")
 def get_config(
     user_id: str = Depends(get_current_user), db: DatabaseManager = Depends(get_db)
 ):
@@ -61,7 +87,7 @@ def get_config(
         )
 
 
-@router.get("/config-selection")
+@router.get("/config")
 def get_config_selection(
     user_id: str = Depends(get_current_user), db: DatabaseManager = Depends(get_db)
 ):
@@ -109,6 +135,15 @@ def get_messages(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
         )
+
+
+@router.post("/message")
+def post_message(message: str = Form(...), db: DatabaseManager = Depends(get_db)):
+    """Post a user's feedback message"""
+
+    service = BuilderService(db)
+
+    pass
 
 
 @router.get("/session")

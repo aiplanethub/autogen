@@ -224,6 +224,7 @@ class EvalRunDB(BaseDBModel, table=True):
     # Additional metadata
     error_message: Optional[str] = None
 
+
 class BuilderRole(str, Enum):
     USER = "user"
     ASSISTANT = "assistant"
@@ -266,8 +267,7 @@ class BuilderConfigSelection(BaseDBModel, table=True):
     knowledgebases: List[str] = Field(default_factory=list, sa_type=JSON)
 
     gallery_id: int = Field(foreign_key="gallery.id")
+    builder_session_id: int = Field(foreign_key="buildersession.id", ondelete="CASCADE")
 
     gallery: "Gallery" = Relationship(back_populates="builder_configs")
-    builder_session_id: int = Field(foreign_key="buildersession.id", ondelete="CASCADE")
     builder_session: BuilderSession = Relationship(back_populates="config")
-
