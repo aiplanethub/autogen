@@ -57,11 +57,11 @@ class BuilderService:
 
     def save(
         self,
-        id: Optional[int],
-        name: Optional[str],
-        workflow_config: Optional[dict],
-        user_id: Optional[str],
-        is_active: Optional[bool],
+        id: Optional[int] = None,
+        name: Optional[str] = None,
+        workflow_config: Optional[dict] = None,
+        user_id: Optional[str] = None,
+        is_active: Optional[bool] = True,
     ) -> BuilderSession:
         session = BuilderSession(
             id=id,
@@ -83,34 +83,44 @@ class BuilderService:
         if not response.status:
             raise Exception(response.message)
 
-    def get_session(self, user_id: str) -> BuilderSession | None:
+    def list_sessions(self, user_id: str) -> list[BuilderSession] | None:
         filters = {"user_id": user_id, "is_active": True}
-        response = self.db.get(BuilderSession, filters)
-        if response.status and len(response.data) != 0:
+        response = self.db.get(BuilderSession, filters, True)
+        if response.status:
             return response.data
 
-        if len(response.data == 0):
-            return None
+        return None
 
-        raise Exception(response.message)
+    def get_session(self, builder_id: str) -> BuilderSession:
+        filters = {"id": builder_id, "is_active": True}
+        response = self.db.get(BuilderSession, filters)
+        if response.status and len(response.data) != 0:
+            return response.data[0]
 
-    def get_messages(self, user_id: str):
-        session = self.get_session(user_id)
-        if not session:
-            return None
+        return None
 
-        return session.messages
+    def get_messages(self, builder_id: str):
+        filters = {"builder_session_id": builder_id}
+        response = self.db.get(BuilderMessage, filters)
+        print(response)
 
-    def get_workflow_config(self, user_id: str):
-        session = self.get_session(user_id)
+        if response.status:
+            return response.data
+
+        return []
+
+    def get_workflow_config(self, builder_id: str):
+        session = self.get_session(builder_id)
         if not session:
             return None
 
         return session.workflow_config
 
-    def get_config_selection(self, user_id):
-        session = self.get_session(user_id)
-        if not session:
-            return None
+    def get_config_selection(self, builder_id):
+        filters = {"builder_session_id": builder_id}
+        response = self.db.get(BuilderConfigSelection, filters)
 
-        return session.config
+        if response.status:
+            return response.data
+
+        return []
