@@ -25,6 +25,9 @@ import traceback
 from autogenstudio.planner.clarification_agent import ClarificationAgent
 from autogenstudio.core.config import get_settings
 import asyncio
+from fastapi.responses import StreamingResponse
+from autogen_agentchat.messages import TextMessage, UserInputRequestedEvent
+
 
 router = APIRouter()
 
@@ -64,6 +67,25 @@ async def create_team(team: Team, db=Depends(get_db)) -> Dict:
     if not response.status:
         raise HTTPException(status_code=400, detail=response.message)
     return {"status": True, "data": response.data}
+
+
+async def stream_generator(gc, prompt: str = ""):
+    try:
+        async for chunk in gc.run_stream(task=prompt):
+            if isinstance(chunk, TextMessage) or isinstance(
+                chunk, UserInputRequestedEvent
+            ):
+                data = {"text": chunk.content}
+            else:
+                data = chunk
+            yield f"data: {json.dumps(data)}\n\n"
+
+    except Exception as e:
+        error_msg = f"Error in streaming: {str(e)} {traceback.format_exc()}"
+        print(error_msg)
+        yield f"data: {json.dumps({'error': error_msg})}\n\n"
+    finally:
+        yield f"data: {json.dumps({'type': 'stream_end'})}\n\n"
 
 
 @router.post("/plan")
@@ -115,6 +137,9 @@ async def plan_team(
             kb_collection_name=knowledge_base,
         )
 
+        if gallery_id not in builder_queues:
+            builder_queues[gallery_id] = asyncio.Queue(maxsize=1)
+
         user_proxy_agent = QueueUserProxyAgent("user_proxy", gallery_id, builder_queues)
 
         selector_gc = planner_orchestrator(
@@ -122,19 +147,13 @@ async def plan_team(
             agents=[user_proxy_agent, planner_agent, clarification_agent],
         )
 
-        task = asyncio.create_task(selector_gc.run_stream(task=prompt))
+        return StreamingResponse(
+            stream_generator(gc=selector_gc, prompt=prompt), media_type="text/event-stream"  # type: ignore
+        )
 
-        return {
-            "status": True,
-            "data": {
-                "response": "Conversation started, waiting for user input via WebSocket",
-                "agents": selector_gc._participant_names,
-                "gallery_id": gallery_id,
-            },
-        }
     except Exception as e:
         print(f"Error in planning: {str(e)} {traceback.format_exc()}")
-        return Response(status=False, data=[], message=f"Error in planning: {str(e)}")
+        return Response(status=False, data=[], message=f"Error in planning: {str(e)}")  # type: ignore
 
 
 @router.websocket("/ws/{builder_id}")
