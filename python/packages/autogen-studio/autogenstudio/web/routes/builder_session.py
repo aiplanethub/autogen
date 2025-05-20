@@ -1,9 +1,10 @@
 from typing import Optional
+
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, status
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from ...database import DatabaseManager
-from ...datamodel import BuilderSession
 from ...datamodel.types import Response
 from ...services.builder import BuilderService
 from ..deps import get_current_user, get_db
@@ -15,15 +16,19 @@ router = APIRouter(
 )
 
 
+class CreateSessionRequest(BaseModel):
+    name: str = Field(...)
+    user_id: str = Field(...)
+
+
 @router.post("/")
 async def create_session(
-    name: str = Form(..., description="session name"),
-    user_id: str = Form(..., description="user id"),
+    payload: CreateSessionRequest,
     db: DatabaseManager = Depends(get_db),
 ):
     try:
         service = BuilderService(db)
-        response = service.save(user_id=user_id, name=name)
+        response = service.save(user_id=payload.user_id, name=payload.name)
 
         return JSONResponse(
             content={
