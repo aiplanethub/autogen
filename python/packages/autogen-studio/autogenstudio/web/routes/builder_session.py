@@ -15,7 +15,7 @@ router = APIRouter(
 
 
 @router.post("/")
-def create_session(
+async def create_session(
     user_id: str = Depends(get_current_user),
     db: DatabaseManager = Depends(get_db),
 ):
@@ -45,7 +45,9 @@ def create_session(
 
 
 @router.get("/")
-def get_builder(builder_id: str = Query(...), db: DatabaseManager = Depends(get_db)):
+async def get_builder(
+    builder_id: str = Query(...), db: DatabaseManager = Depends(get_db)
+):
     try:
         service = BuilderService(db)
         builder = service.get_session(builder_id)
@@ -75,7 +77,7 @@ def get_builder(builder_id: str = Query(...), db: DatabaseManager = Depends(get_
 
 
 @router.get("/list")
-def get_builder(user_id: str = Query(...), db: DatabaseManager = Depends(get_db)):
+async def get_builder(user_id: str = Query(...), db: DatabaseManager = Depends(get_db)):
     try:
         service = BuilderService(db)
         builders = service.list_sessions(user_id)
@@ -109,13 +111,15 @@ def get_builder(user_id: str = Query(...), db: DatabaseManager = Depends(get_db)
 
 
 @router.get("/workflow")
-def get_config(user_id: str = Query(...), db: DatabaseManager = Depends(get_db)):
+async def get_config(
+    builder_id: str = Query(...), db: DatabaseManager = Depends(get_db)
+):
     try:
         service = BuilderService(db)
-        config = service.get_workflow_config(user_id)
+        config = service.get_workflow_config(builder_id)
         if not config:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+                status_code=status.HTTP_204_NO_CONTENT, detail="Session not found"
             )
 
         return Response(
@@ -132,15 +136,15 @@ def get_config(user_id: str = Query(...), db: DatabaseManager = Depends(get_db))
 
 
 @router.get("/config")
-def get_config_selection(
-    user_id: str = Query(...), db: DatabaseManager = Depends(get_db)
+async def get_config_selection(
+    builder_id: str = Query(...), db: DatabaseManager = Depends(get_db)
 ):
     try:
         service = BuilderService(db)
-        config = service.get_config_selection(user_id)
+        config = service.get_config_selection(builder_id)
         if not config:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+                status_code=status.HTTP_204_NO_CONTENT, detail="Session not found"
             )
 
         return Response(
@@ -157,13 +161,15 @@ def get_config_selection(
 
 
 @router.get("/messages")
-def get_messages(user_id: str = Query(...), db: DatabaseManager = Depends(get_db)):
+async def get_messages(
+    builder_id: str = Query(...), db: DatabaseManager = Depends(get_db)
+):
     try:
         service = BuilderService(db)
-        messages = service.get_messages(user_id)
+        messages = service.get_messages(builder_id)
         if not messages:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+                status_code=status.HTTP_204_NO_CONTENT, detail="Session not found"
             )
 
         return Response(
@@ -180,7 +186,7 @@ def get_messages(user_id: str = Query(...), db: DatabaseManager = Depends(get_db
 
 
 @router.post("/message")
-def post_message(message: str = Form(...), db: DatabaseManager = Depends(get_db)):
+async def post_message(message: str = Form(...), db: DatabaseManager = Depends(get_db)):
     """Post a user's feedback message"""
 
     service = BuilderService(db)
@@ -188,33 +194,8 @@ def post_message(message: str = Form(...), db: DatabaseManager = Depends(get_db)
     pass
 
 
-@router.get("/session")
-def get_session(
-    user_id: str = Depends(get_current_user), db: DatabaseManager = Depends(get_db)
-):
-    try:
-        service = BuilderService(db)
-        session = service.get_session(user_id)
-        if not session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
-            )
-
-        return Response(
-            status=True, message="Session fetched", data=session.model_dump()
-        )
-
-    except HTTPException:
-        raise
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
-        )
-
-
 @router.patch("/")
-def update(
+async def update(
     config: dict = Form(..., description="Workflow Config"),
     user_id: str = Depends(get_current_user),
     db: DatabaseManager = Depends(get_db),
@@ -238,7 +219,9 @@ def update(
 
 
 @router.delete("/")
-def delete_session(session_id: int = Form(...), db: DatabaseManager = Depends(get_db)):
+async def delete_session(
+    session_id: int = Form(...), db: DatabaseManager = Depends(get_db)
+):
     try:
         service = BuilderService(db)
         service.delete_session(session_id)
