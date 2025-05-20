@@ -1,3 +1,4 @@
+from typing import Optional
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 
@@ -16,12 +17,13 @@ router = APIRouter(
 
 @router.post("/")
 async def create_session(
-    user_id: str = Depends(get_current_user),
+    name: str = Form(..., description="session name"),
+    user_id: str = Form(..., description="user id"),
     db: DatabaseManager = Depends(get_db),
 ):
     try:
         service = BuilderService(db)
-        response = service.save(user_id=user_id)
+        response = service.save(user_id=user_id, name=name)
 
         return JSONResponse(
             content={
@@ -46,23 +48,47 @@ async def create_session(
 
 @router.get("/")
 async def get_builder(
-    builder_id: str = Query(...), db: DatabaseManager = Depends(get_db)
+    builder_id: Optional[str] = Query(default=None, description="builder id"),
+    user_id: str = Depends(get_current_user),
+    db: DatabaseManager = Depends(get_db),
 ):
     try:
+        data = None
         service = BuilderService(db)
-        builder = service.get_session(builder_id)
-        if not builder:
-            raise HTTPException(
-                status_code=status.HTTP_204_NO_CONTENT, detail="Session not found"
-            )
-        return Response(
-            data={
+        if builder_id:
+            builder = service.get_session(builder_id)
+            if not builder:
+                raise HTTPException(
+                    status_code=status.HTTP_204_NO_CONTENT, detail="Session not found"
+                )
+
+            data = {
                 "id": builder.id,
                 "name": builder.name,
                 "summary": builder.summary,
                 "config": builder.workflow_config,
                 "created_at": str(builder.created_at),
-            },
+            }
+        else:
+            builders = service.list_sessions(user_id)
+            if not builders:
+                raise HTTPException(
+                    status_code=status.HTTP_204_NO_CONTENT, detail="Session not found"
+                )
+
+            data = [
+                {
+                    "id": builder.id,
+                    "name": builder.name,
+                    "summary": builder.summary,
+                    "config": builder.workflow_config,
+                    "created_at": str(builder.created_at),
+                }
+                for builder in builders
+            ]
+
+        return Response(
+            data=data,
             status=True,
             message="Builder fetched successfully",
         )

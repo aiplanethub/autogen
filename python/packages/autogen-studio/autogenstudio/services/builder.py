@@ -85,7 +85,7 @@ class BuilderService:
 
     def list_sessions(self, user_id: str) -> list[BuilderSession] | None:
         filters = {"user_id": user_id, "is_active": True}
-        response = self.db.get(BuilderSession, filters, True)
+        response = self.db.get(BuilderSession, filters)
         if response.status:
             return response.data
 
