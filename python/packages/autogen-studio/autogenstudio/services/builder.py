@@ -77,8 +77,8 @@ class BuilderService:
 
         raise Exception(response.message)
 
-    def delete_session(self, session_id):
-        response = self.db.delete(BuilderSession, {"id": session_id})
+    def delete_session(self, builder_id):
+        response = self.db.delete(BuilderSession, {"id": builder_id})
 
         if not response.status:
             raise Exception(response.message)

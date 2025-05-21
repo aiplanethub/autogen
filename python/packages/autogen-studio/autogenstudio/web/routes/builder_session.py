@@ -21,6 +21,10 @@ class CreateSessionRequest(BaseModel):
     user_id: str = Field(...)
 
 
+class DeleteSessionRequest(BaseModel):
+    builder_id: int = Field(...)
+
+
 @router.post("/")
 async def create_session(
     payload: CreateSessionRequest,
@@ -251,11 +255,11 @@ async def update(
 
 @router.delete("/")
 async def delete_session(
-    session_id: int = Form(...), db: DatabaseManager = Depends(get_db)
+    payload: DeleteSessionRequest, db: DatabaseManager = Depends(get_db)
 ):
     try:
         service = BuilderService(db)
-        service.delete_session(session_id)
+        service.delete_session(payload.builder_id)
 
         return Response(status=True, message="Session deleted")
 
