@@ -31,6 +31,8 @@ dependencies = [
     # List other dependencies here
     "pypdf2>=3.0.1",
     "pytesseract>=0.3.13",
+    "pytest>=8.3.4",
+    "pytest-asyncio>=0.25.3",
 ]
 
 [project.optional-dependencies]
