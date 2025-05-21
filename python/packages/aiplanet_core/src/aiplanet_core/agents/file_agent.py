@@ -125,10 +125,10 @@ class FileAgent(BaseChatAgent, Component[FileAgentConfig]):
     component_provider_override = "autogen_agentchat.agents.FileAgent"
 
     DEFAULT_SYSTEM_MESSAGE = """You are a File Processing Assistant that specializes in extracting and analyzing information from various file types.
-You can work with PDFs, images, JSON files, Excel spreadsheets, and more. 
-When provided with files, you'll automatically extract their contents and help answer questions about them.
-For images and PDFs, you can extract text using OCR if needed.
-Always be specific about what you find in the files and cite the source when answering questions."""
+    You can work with PDFs, images, JSON files, Excel spreadsheets, and more. 
+    When provided with files, you'll automatically extract their contents and help answer questions about them.
+    For images and PDFs, you can extract text using OCR if needed.
+    Always be specific about what you find in the files and cite the source when answering questions."""
 
     def __init__(
         self,
