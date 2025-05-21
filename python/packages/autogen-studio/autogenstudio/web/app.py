@@ -13,9 +13,15 @@ from ..version import VERSION
 from .auth import authroutes
 from .auth.middleware import AuthMiddleware
 from .config import settings
-from .deps import cleanup_managers, init_auth_manager, init_managers, register_auth_dependencies
+from .deps import (
+    cleanup_managers,
+    init_auth_manager,
+    init_managers,
+    register_auth_dependencies,
+)
 from .initialization import AppInitializer
 from .routes import gallery, runs, sessions, settingsroute, teams, validation, ws
+from .routes import file, builder_session
 
 # Initialize application
 app_file_path = os.path.dirname(os.path.abspath(__file__))
@@ -31,7 +37,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     try:
         # Initialize managers (DB, Connection, Team)
-        await init_managers(initializer.database_uri, initializer.config_dir, initializer.app_root)
+        await init_managers(
+            initializer.database_uri, initializer.config_dir, initializer.app_root
+        )
 
         await register_auth_dependencies(app, auth_manager)
 
@@ -140,6 +148,9 @@ api.include_router(
     tags=["auth"],
     responses={404: {"description": "Not found"}},
 )
+
+api.include_router(file.router)
+api.include_router(builder_session.router)
 
 # Version endpoint
 
