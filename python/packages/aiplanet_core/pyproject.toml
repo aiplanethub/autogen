@@ -67,3 +67,13 @@ disallow_incomplete_defs = true
 [tool.uv.sources]
 autogen-agentchat = { workspace = true }
 autogen-core = { workspace = true }
+
+[tool.ruff]
+extend = "../../pyproject.toml"
+include = ["src/**", "tests/*.py"]
+
+[tool.poe]
+include = "../../shared_tasks.toml"
+
+[tool.poe.tasks]
+test = "pytest -n auto --cov=src --cov-report=term-missing --cov-report=xml"
