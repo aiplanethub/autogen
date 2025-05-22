@@ -21,7 +21,7 @@ from .deps import (
 )
 from .initialization import AppInitializer
 from .routes import gallery, runs, sessions, settingsroute, teams, validation, ws
-from .routes import file, builder_session
+from .routes import file, builder_session, prompt
 
 # Initialize application
 app_file_path = os.path.dirname(os.path.abspath(__file__))
@@ -151,6 +151,7 @@ api.include_router(
 
 api.include_router(file.router)
 api.include_router(builder_session.router)
+api.include_router(prompt.router)
 
 # Version endpoint
 
