@@ -96,29 +96,326 @@ class FileAgentConfig(BaseModel):
 class FileAgent(BaseChatAgent, Component[FileAgentConfig]):
     """An agent that specializes in processing files and answering questions about them.
 
-    The agent can handle various file types including PDFs, images, JSON, and Excel files.
+    The FileAgent can handle various file types including PDFs, images, JSON, and Excel files.
     It automatically extracts content from these files and includes it in responses to user queries.
+    The agent provides built-in tools for file operations and can optionally use OCR for text extraction
+    from images and PDFs.
+
+    Key Features:
+        - Automatic file content extraction for PDFs, images, JSON, and Excel files
+        - Built-in OCR support for text extraction from images and scanned PDFs
+        - Configurable extraction depth for handling large files
+        - Memory integration for context-aware file processing
+        - Tool integration for enhanced file operations
+        - Progress tracking through FileProcessingEvent messages
 
     Args:
         name (str): The name of the agent.
         model_client (ChatCompletionClient): The model client to use for inference.
         tools (List[BaseTool[Any, Any]] | None, optional): 
-            Additional tools to register with the agent.
+            Additional tools to register with the agent. These will be combined with built-in file tools.
         workbench (Workbench | None, optional): The workbench to use for the agent.
+            Cannot be used together with the tools parameter.
         model_context (ChatCompletionContext | None, optional): The model context for storing and retrieving messages.
-        memory (Sequence[Memory] | None, optional): The memory store to use for the agent.
+            Defaults to UnboundedChatCompletionContext if not specified.
+        memory (Sequence[Memory] | None, optional): The memory store to use for the agent. 
+            Enables context-aware processing across conversations.
         description (str, optional): The description of the agent.
+            Defaults to "An agent that specializes in processing and analyzing files".
         system_message (str, optional): The system message for the model.
+            Provides instructions for file processing behavior.
         model_client_stream (bool, optional): Whether to use streaming for model responses.
-        supported_file_types (List[str] | None, optional): List of file extensions to support (e.g., ["pdf", "json"]).
-            If None, all supported file types are enabled.
+            Defaults to False.
+        supported_file_types (List[str] | None, optional): List of file extensions to support 
+            (e.g., ["pdf", "json", "xlsx", "png"]). If None, all supported file types are enabled.
         ocr_enabled (bool, optional): Whether to enable OCR for images and PDFs.
+            Requires additional OCR dependencies. Defaults to False.
         extraction_depth (int, optional): How deeply to extract content from files (1-3).
+            Higher values extract more detailed content but may be slower. Defaults to 1.
         file_handlers (Dict[str, str] | None, optional): Custom handlers for specific file types.
-        working_directory (str | None, optional): Directory for file operations. Defaults to current directory.
-        reflect_on_tool_use (bool, optional): If True, the agent will make another model inference using the tool call
-            results to generate a response. Defaults to True.
+            Maps file extensions or MIME types to handler method names.
+        working_directory (str | None, optional): Directory for file operations. 
+            Defaults to current working directory.
+        reflect_on_tool_use (bool, optional): If True, the agent will make another model inference 
+            using the tool call results to generate a response. Defaults to True.
         metadata (Dict[str, Any] | None, optional): Additional metadata for the agent.
+
+    Raises:
+        ValueError: If tool names are not unique or if tools are used with a workbench.
+        TypeError: If memory parameter is not the correct type.
+
+    Examples:
+
+        **Basic File Processing Agent:**
+
+        .. code-block:: python
+
+            import asyncio
+            from autogen_ext.models.openai import OpenAIChatCompletionClient
+            from aiplanet_core.agents import FileAgent
+            from autogen_agentchat.ui import Console
+            from aiplanet_core.types.messages import (
+                ExcelMessage,
+                FileMessage,
+                ImageMessage,
+                JSONMessage,
+                PDFMessage,
+                PDFWithOCRMessage,
+                register_file_message_types,
+            )
+
+
+            async def main() -> None:
+                model_client = OpenAIChatCompletionClient(model="gpt-4o")
+                
+                # Create a basic file processing agent
+                file_agent = FileAgent(
+                    name="file_processor",
+                    model_client=model_client,
+                    description="Specialized agent for processing and analyzing files"
+                )
+
+                json_message = JSONMessage(
+                    source="user",
+                    filepath=json_file_path,
+                    filename="sample.json",
+                    filetype="json"
+                )
+
+                pdf_message = PDFMessage(
+                    source="user",
+                    filepath="sample.pdf",
+                    filename=pdf_file_path,
+                    filetype="application/pdf"
+                )
+
+                excel_message = ExcelMessage(
+                    source="user",
+                    filepath=file_path,
+                    filename=sample.csv,
+                    filetype="csv"
+                )
+
+                file_message = FileMessage(
+                    source="user",
+                    filepath=file_path,
+                    filename=filename,
+                    filetype=file_extension.lstrip(".")
+                )
+
+                image_message = ImageMessage(
+                    source="user",
+                    filepath=image_path,
+                    filename=image_name,
+                    filetype=image_extension.lstrip(".")
+                )
+
+                pdf_ocr_message = PDFWithOCRMessage(
+                    source="user",
+                    filepath=pdf_path,
+                    filename=pdf_name,
+                    filetype="application/pdf",
+                    ocr_language="eng"
+                )
+
+                messages = [json_message, pdf_message, excel_message, file_message, image_message, pdf_ocr_message]
+                
+                # Use the agent to analyze files
+                result = await file_agent.run(
+                    task=messages
+                )
+                print(result.messages[-1].content)
+
+
+            asyncio.run(main())
+
+        **File Agent with OCR and Custom Tools:**
+
+        .. code-block:: python
+
+            import asyncio
+            from autogen_ext.models.openai import OpenAIChatCompletionClient
+            from aiplanet_core.agents import FileAgent
+            from autogen_agentchat.ui import Console
+            from autogen_core.tools import FunctionTool
+
+
+            async def custom_file_validator(filepath: str) -> str:
+                \"\"\"Custom tool to validate file integrity.\"\"\"
+                # Implementation would check file validity
+                return f"File {filepath} is valid and ready for processing."
+
+
+            async def main() -> None:
+                model_client = OpenAIChatCompletionClient(model="gpt-4o")
+                
+                # Create custom tools
+                validator_tool = FunctionTool(
+                    custom_file_validator,
+                    description="Validate file integrity before processing"
+                )
+                
+                # Create file agent with OCR and custom tools
+                file_agent = FileAgent(
+                    name="advanced_file_processor",
+                    model_client=model_client,
+                    tools=[validator_tool],
+                    ocr_enabled=True,  # Enable OCR for images and PDFs
+                    extraction_depth=2,  # More detailed extraction
+                    working_directory="./documents",
+                    system_message="You are an advanced file processor with OCR capabilities. 
+                    Always validate files before processing and provide detailed analysis."
+                )
+                
+                # Process files with OCR
+                await Console(
+                    file_agent.run_stream(
+                        task="Extract text from the scanned document and analyze its contents."
+                    )
+                )
+
+
+            asyncio.run(main())
+
+        **File Agent in a Team Environment:**
+
+        .. code-block:: python
+
+            import asyncio
+            from autogen_ext.models.openai import OpenAIChatCompletionClient
+            from autogen_agentchat.agents import FileAgent, AssistantAgent
+            from autogen_agentchat.teams import RoundRobinGroupChat
+            from autogen_agentchat.conditions import MaxMessageTermination
+            from autogen_agentchat.ui import Console
+
+
+            async def main() -> None:
+                model_client = OpenAIChatCompletionClient(model="gpt-4o")
+                
+                # Create a file processing agent
+                file_agent = FileAgent(
+                    name="file_analyst",
+                    model_client=model_client,
+                    ocr_enabled=True,
+                    extraction_depth=3,
+                    system_message="Extract and analyze file contents. Focus on data extraction and summarization."
+                )
+                
+                # Create a report writer agent
+                report_agent = AssistantAgent(
+                    name="report_writer",
+                    model_client=model_client,
+                    system_message="Create comprehensive reports based on file analysis results."
+                )
+                
+                # Create a team
+                termination = MaxMessageTermination(6)
+                team = RoundRobinGroupChat(
+                    [file_agent, report_agent],
+                    termination_condition=termination
+                )
+                
+                # Run the team to process files and generate reports
+                await Console(
+                    team.run_stream(
+                        task="Please process the uploaded financial documents and create a summary report."
+                    )
+                )
+
+
+            asyncio.run(main())
+
+        **File Agent with Memory Integration:**
+
+        .. code-block:: python
+
+            import asyncio
+            from autogen_ext.models.openai import OpenAIChatCompletionClient
+            from aiplanet_core.agents import FileAgent
+            from autogen_core.memory import ListMemory, MemoryContent
+            from autogen_agentchat.ui import Console
+
+
+            async def main() -> None:
+                model_client = OpenAIChatCompletionClient(model="gpt-4o")
+                
+                # Create memory with some initial context
+                memory = ListMemory()
+                await memory.add(MemoryContent(
+                    content="Previously processed files showed quarterly revenue trends.",
+                    mime_type="text/plain"
+                ))
+                
+                # Create file agent with memory
+                file_agent = FileAgent(
+                    name="contextual_file_processor",
+                    model_client=model_client,
+                    memory=[memory],
+                    extraction_depth=2,
+                    system_message="You process files while considering previous analysis context.
+                    Always relate new findings to previous insights when relevant."
+                )
+                
+                # Process files with contextual awareness
+                result = await file_agent.run(
+                    task="Analyze this new financial report and compare it with previous trends."
+                )
+                print(result.messages[-1].content)
+
+
+            asyncio.run(main())
+
+        **Custom File Handler Example:**
+
+        .. code-block:: python
+
+            import asyncio
+            from autogen_ext.models.openai import OpenAIChatCompletionClient
+            from aiplanet_core.agents import FileAgent
+
+
+            class CustomFileAgent(FileAgent):
+                \"\"\"Extended FileAgent with custom file handlers.\"\"\"
+                
+                async def handle_csv_file(self, msg):
+                    \"\"\"Custom handler for CSV files.\"\"\"
+                    # Custom CSV processing logic
+                    return f"Processed CSV file: {msg.filename} with custom logic"
+                
+                async def handle_xml_file(self, msg):
+                    \"\"\"Custom handler for XML files.\"\"\"
+                    # Custom XML processing logic
+                    return f"Processed XML file: {msg.filename} with custom logic"
+
+
+            async def main() -> None:
+                model_client = OpenAIChatCompletionClient(model="gpt-4o")
+                
+                # Create agent with custom file handlers
+                file_agent = CustomFileAgent(
+                    name="custom_file_processor",
+                    model_client=model_client,
+                    file_handlers={
+                        "csv": "handle_csv_file",
+                        "xml": "handle_xml_file"
+                    },
+                    system_message="You can process various file types including CSV and XML "
+                                  "with specialized handlers."
+                )
+                
+                result = await file_agent.run(
+                    task="Process the uploaded data files and extract key information."
+                )
+                print(result.messages[-1].content)
+
+
+            asyncio.run(main())
+
+    Note:
+        The FileAgent automatically registers file message types with its internal MessageFactory.
+        When processing files, the agent yields FileProcessingEvent messages to track progress.
+        OCR functionality requires additional dependencies (like pytesseract) to be installed.
+        
     """
 
     component_config_schema = FileAgentConfig
