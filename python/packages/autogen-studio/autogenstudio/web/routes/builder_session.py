@@ -296,10 +296,6 @@ async def update(
         )
 
 
-class DeleteSession(BaseModel):
-    builder_id: int
-
-
 @router.delete("/")
 async def delete_session(
     payload: DeleteSessionRequest, db: DatabaseManager = Depends(get_db)
