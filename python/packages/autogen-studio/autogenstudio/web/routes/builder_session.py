@@ -200,7 +200,7 @@ async def get_agents(
                 status_code=status.HTTP_204_NO_CONTENT, detail="Session not found"
             )
 
-        return Response(data=config, status=True, message="Agents fetched")
+        return Response(data=config, status=True, message="Knowledge bases fetched")
 
     except HTTPException:
         raise
