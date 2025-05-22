@@ -254,7 +254,10 @@ class BuilderMessage(BaseDBModel, table=True):
     message_meta: Optional[Union[MessageMeta, dict]] = Field(default={}, sa_type=JSON)
 
     builder_session_id: int = Field(
-        sa_type=Integer, foreign_key="buildersession.id", ondelete="CASCADE"
+        nullable=True,
+        sa_type=Integer,
+        foreign_key="buildersession.id",
+        ondelete="CASCADE",
     )
     builder_session: BuilderSession = Relationship(back_populates="messages")
 
