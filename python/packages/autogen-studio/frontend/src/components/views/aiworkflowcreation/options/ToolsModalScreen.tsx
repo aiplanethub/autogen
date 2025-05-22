@@ -1,0 +1,70 @@
+import React, { useMemo, useState } from "react";
+import Icon from "../../../Icon";
+import useDebounce from "../../../utils/utils";
+import ListItem from "./ListItem";
+import { AgentAndToolProps } from "../../../types/aiworkflowcreation";
+
+const ToolsModalScreen: React.FC<{
+  selectedGallery: string;
+  onChangeGallery: () => void;
+  tools: Array<AgentAndToolProps>;
+  onToggleTool: (id: string) => void;
+}> = ({ selectedGallery, onChangeGallery, tools, onToggleTool }) => {
+  const [searchTerm, setSearchTerm] = useState("");
+  const debouncedSearchTerm = useDebounce(searchTerm, 200); // debounce by 200ms
+
+  // Filter galleries based on search term
+  const filteredTools = useMemo(() => {
+    return tools.filter((tool) =>
+      tool?.name?.toLowerCase().includes(debouncedSearchTerm.toLowerCase())
+    );
+  }, [tools, debouncedSearchTerm]);
+
+  return (
+    <div className="max-w-3xl mx-auto py-6">
+      {/* Selected Gallery */}
+      <div className="flex justify-between items-center mb-6 mx-6">
+        <div className="flex items-center space-x-2">
+          <Icon name="galleryIcon" className="text-primary" size={22} />
+          <h1 className="text-base text-primary font-medium">
+            Gallery: {selectedGallery}
+          </h1>
+        </div>
+        <button
+          onClick={() => onChangeGallery()}
+          className="text-[#115E59] hover:bg-[#115E59] hover:text-white underline hover:no-underline py-2 px-4 rounded-md transition-colors"
+        >
+          Change
+        </button>
+      </div>
+
+      {/* Search */}
+      <div className="relative mx-6 mb-2">
+        <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+          <Icon name="search" className="h-4 w-4 text-gray-500" />
+        </div>
+        <input
+          type="text"
+          placeholder="Search Gallery"
+          className="w-full py-2 pl-10 bg-primary border border-secondary rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 text-primary"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+        />
+      </div>
+
+      {/* Tools */}
+      <div className="max-h-[325px] h-full overflow-y-auto">
+        {filteredTools.map((tool) => (
+          <ListItem
+            key={tool?.id || ""}
+            name={tool?.name || ""}
+            enabled={tool.enabled}
+            onToggle={() => onToggleTool(tool?.id || "")}
+          />
+        ))}
+      </div>
+    </div>
+  );
+};
+
+export default ToolsModalScreen;

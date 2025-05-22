@@ -14,6 +14,7 @@ import {
   Beaker,
   LucideBeaker,
   FlaskConical,
+  Sparkles,
 } from "lucide-react";
 import Icon from "./icons";
 import { BeakerIcon } from "@heroicons/react/24/outline";
@@ -35,6 +36,18 @@ const navigation: INavItem[] = [
     href: "/build",
     icon: Bot,
     breadcrumbs: [{ name: "Team Builder", href: "/build", current: true }],
+  },
+  {
+    name: "AI Workflow Creation",
+    href: "/aiworkflowcreation",
+    icon: Sparkles,
+    breadcrumbs: [
+      {
+        name: "AI Workflow Creation",
+        href: "/aiworkflowcreation",
+        current: true,
+      },
+    ],
   },
   {
     name: "Playground",
