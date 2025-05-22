@@ -13,7 +13,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 
-from ...datamodel import Team, Gallery
+from ...datamodel import Team, Gallery, BuilderMessage, BuilderRole, MessageMeta
 from ...gallery.builder import create_default_gallery
 from ..deps import get_db
 from autogenstudio.planner.orchestrator import planner_orchestrator
@@ -25,6 +25,10 @@ import traceback
 from autogenstudio.planner.clarification_agent import ClarificationAgent
 from autogenstudio.core.config import get_settings
 import asyncio
+from fastapi.responses import StreamingResponse
+from autogen_agentchat.messages import TextMessage, UserInputRequestedEvent
+import datetime
+
 
 router = APIRouter()
 
@@ -64,6 +68,39 @@ async def create_team(team: Team, db=Depends(get_db)) -> Dict:
     if not response.status:
         raise HTTPException(status_code=400, detail=response.message)
     return {"status": True, "data": response.data}
+
+
+async def upsert_and_stream(gallery_id, gc, db, prompt: str = ""):
+    try:
+        assistant_message = ""
+        async for chunk in gc.run_stream(task=prompt):
+            if isinstance(chunk, TextMessage) or isinstance(
+                chunk, UserInputRequestedEvent
+            ):
+                data = {"text": chunk.content}
+                assistant_message += chunk.content
+            else:
+                data = chunk
+
+            # Store partial response data in the database
+            builder_message_model = BuilderMessage(
+                builder_session_id=gallery_id,
+                role=BuilderRole.ASSISTANT,
+                content=assistant_message,
+                message_meta=MessageMeta(
+                    task=prompt,
+                    time=datetime.datetime.now(datetime.timezone.utc),
+                ),
+            )
+            db.upsert(builder_message_model)
+
+            yield f"data: {json.dumps(data)}\n\n"
+    except Exception as e:
+        error_msg = f"Error in streaming: {str(e)} {traceback.format_exc()}"
+        print(error_msg)
+        yield f"data: {json.dumps({'error': error_msg})}\n\n"
+    finally:
+        yield f"data: {json.dumps({'type': 'stream_end'})}\n\n"
 
 
 @router.post("/plan")
@@ -115,6 +152,9 @@ async def plan_team(
             kb_collection_name=knowledge_base,
         )
 
+        if gallery_id not in builder_queues:
+            builder_queues[gallery_id] = asyncio.Queue(maxsize=1)
+
         user_proxy_agent = QueueUserProxyAgent("user_proxy", gallery_id, builder_queues)
 
         selector_gc = planner_orchestrator(
@@ -122,23 +162,35 @@ async def plan_team(
             agents=[user_proxy_agent, planner_agent, clarification_agent],
         )
 
-        task = asyncio.create_task(selector_gc.run_stream(task=prompt))
+        intermediate_task_result = await selector_gc.save_state()
 
-        return {
-            "status": True,
-            "data": {
-                "response": "Conversation started, waiting for user input via WebSocket",
-                "agents": selector_gc._participant_names,
-                "gallery_id": gallery_id,
-            },
-        }
+        builder_message_model = BuilderMessage(
+            builder_session_id=gallery_id,
+            role=BuilderRole.USER,
+            content=prompt,
+            message_meta=MessageMeta(
+                task=prompt,
+                time=datetime.datetime.now(datetime.timezone.utc),
+                summary_method=json.dumps(intermediate_task_result),
+            ),
+        )
+        db.upsert(builder_message_model)
+
+        return StreamingResponse(
+            upsert_and_stream(gallery_id=gallery_id, gc=selector_gc, db=db, prompt=prompt), media_type="text/event-stream"  # type: ignore
+        )
+
     except Exception as e:
         print(f"Error in planning: {str(e)} {traceback.format_exc()}")
-        return Response(status=False, data=[], message=f"Error in planning: {str(e)}")
+        return Response(status=False, data=[], message=f"Error in planning: {str(e)}")  # type: ignore
 
 
 @router.websocket("/ws/{builder_id}")
-async def websocket_endpoint(websocket: WebSocket, builder_id: int):
+async def websocket_endpoint(
+    websocket: WebSocket,
+    builder_id: int,
+    db=Depends(get_db),
+):
     await websocket.accept()
 
     try:
@@ -154,6 +206,16 @@ async def websocket_endpoint(websocket: WebSocket, builder_id: int):
 
             if not builder_queues[builder_id].full():
                 await builder_queues[builder_id].put(message["message"])
+                builder_message_model = BuilderMessage(
+                    builder_session_id=builder_id,
+                    role=BuilderRole.USER,
+                    content=message["message"],
+                    message_meta=MessageMeta(
+                        task=message["message"],
+                        time=datetime.datetime.now(datetime.timezone.utc),
+                    ),
+                )
+                db.upsert(builder_message_model)
                 await websocket.send_json({"status": "message_received"})
             else:
                 await websocket.send_json(

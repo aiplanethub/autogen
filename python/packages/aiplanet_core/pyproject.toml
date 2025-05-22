@@ -31,6 +31,8 @@ dependencies = [
     # List other dependencies here
     "pypdf2>=3.0.1",
     "pytesseract>=0.3.13",
+    "pytest>=8.3.4",
+    "pytest-asyncio>=0.25.3",
 ]
 
 [project.optional-dependencies]
@@ -65,3 +67,13 @@ disallow_incomplete_defs = true
 [tool.uv.sources]
 autogen-agentchat = { workspace = true }
 autogen-core = { workspace = true }
+
+[tool.ruff]
+extend = "../../pyproject.toml"
+include = ["src/**", "tests/*.py"]
+
+[tool.poe]
+include = "../../shared_tasks.toml"
+
+[tool.poe.tasks]
+test = "pytest -n auto --cov=src --cov-report=term-missing --cov-report=xml"

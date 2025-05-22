@@ -1,5 +1,6 @@
 import datetime
 from typing import Optional
+
 from ..database import DatabaseManager
 from ..datamodel import (
     BuilderSession,
@@ -16,42 +17,35 @@ class BuilderService:
         self.db = db
 
     def create(
-        self, user_id: str, gallery_id: int, prompt: str, knowledge_bases: list[str]
+        self,
+        user_id: str,
+        name: str,
     ) -> BuilderSession:
         """Create the builder model and config selection"""
         builder_model = BuilderSession(
-            name="Untitled Session",
+            name=name,
             is_active=True,
             workflow_config={},
             user_id=user_id,
         )
-        response = self.db.upsert(builder_model)
+        response = self.db.upsert(builder_model, return_json=False)
         if not response.status:
             raise Exception(response.message)
 
         builder = response.data
 
-        builder_message_model = BuilderMessage(
-            builder_session_id=builder.id,
-            role=BuilderRole.USER,
-            content=prompt,
-            message_meta=MessageMeta(
-                task=prompt, time=datetime.datetime.now(datetime.timezone.utc)
-            ),
-        )
-        response = self.db.upsert(builder_message_model)
-        if not response.status:
-            raise Exception(response.message)
-
-        builder_message_model = response.data
-        builder_config_selection = BuilderConfigSelection(
-            gallery_id=gallery_id,
-            builder_session_id=builder.id,
-            knowledgebases=knowledge_bases,
-        )
-        response = self.db.upsert(builder_config_selection)
-        if not response.status:
-            raise Exception(response.message)
+        try:
+            builder_config_selection = BuilderConfigSelection(
+                builder_session_id=builder.id,
+                knowledgebases=[],
+                agents=[],
+                tools=[],
+            )
+            response = self.db.upsert(builder_config_selection, return_json=False)
+            # if not response.status:
+            #     raise Exception(response.message)
+        except Exception as e:
+            print(str(e))
 
         return builder
 
@@ -71,14 +65,14 @@ class BuilderService:
             workflow_config=workflow_config,
         )
 
-        response = self.db.upsert(session, return_json=False)
-        if response.status:
-            return response.data
+        builder = self.db.upsert(session, return_json=False)
+        if not builder.status:
+            raise Exception(builder.message)
 
-        raise Exception(response.message)
+        return builder.data
 
-    def delete_session(self, session_id):
-        response = self.db.delete(BuilderSession, {"id": session_id})
+    def delete_session(self, builder_id):
+        response = self.db.delete(BuilderSession, {"id": builder_id})
 
         if not response.status:
             raise Exception(response.message)
@@ -109,6 +103,18 @@ class BuilderService:
 
         return []
 
+    def get_agents(self, builder_id: int):
+        config = self.get_config_selection(builder_id)
+        return config.agents
+
+    def get_tools(self, builder_id: int):
+        config = self.get_config_selection(builder_id)
+        return config.tools
+
+    def get_knowledge_bases(self, builder_id: int):
+        config = self.get_config_selection(builder_id)
+        return config.knowledgebases
+
     def get_workflow_config(self, builder_id: str):
         session = self.get_session(builder_id)
         if not session:
@@ -116,11 +122,35 @@ class BuilderService:
 
         return session.workflow_config
 
-    def get_config_selection(self, builder_id):
+    def get_config_selection(self, builder_id: int) -> BuilderConfigSelection:
         filters = {"builder_session_id": builder_id}
         response = self.db.get(BuilderConfigSelection, filters)
 
         if response.status:
-            return response.data
+            print(response.data)
+            return response.data[0]
 
-        return []
+        raise Exception(response.message)
+
+    def update_config_selection(
+        self,
+        builder_id: int,
+        agents: list[str] = [],
+        tools: list[str] = [],
+        knowledge_bases: list[str] = [],
+        gallery_id: int = None,
+    ):
+
+        builder_config = self.get_config_selection(builder_id)
+
+        if agents:
+            builder_config.agents = agents
+        if tools:
+            builder_config.tools = tools
+        if knowledge_bases:
+            builder_config.knowledgebases = knowledge_bases
+        if gallery_id:
+            builder_config.gallery_id = gallery_id
+
+        new_config = self.db.upsert(builder_config)
+        return new_config

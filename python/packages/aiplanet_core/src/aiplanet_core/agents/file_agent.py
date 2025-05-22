@@ -9,21 +9,10 @@ import asyncio
 import json
 import logging
 import os
-from typing import Any, AsyncGenerator, Dict, List, Mapping, Optional, Sequence, Tuple, Union, cast
+from typing import Any, AsyncGenerator, Dict, List, Mapping, Optional, Sequence, Union, cast
 
-from autogen_agentchat.agents._base_chat_agent import BaseChatAgent
-from autogen_agentchat.base import Response
-from autogen_agentchat.messages import (
-    BaseAgentEvent,
-    BaseChatMessage,
-    MessageFactory,
-    ModelClientStreamingChunkEvent,
-    TextMessage,
-    ThoughtEvent,
-)
-from autogen_agentchat.state import BaseState
-from autogen_agentchat.utils import remove_images
-from autogen_core import CancellationToken, Component, ComponentModel
+from autogen_core import CancellationToken, Component, ComponentModel, FunctionCall
+from autogen_core.memory import Memory
 from autogen_core.model_context import (
     ChatCompletionContext,
     UnboundedChatCompletionContext,
@@ -32,6 +21,8 @@ from autogen_core.models import (
     AssistantMessage,
     ChatCompletionClient,
     CreateResult,
+    FunctionExecutionResult,
+    FunctionExecutionResultMessage,
     LLMMessage,
     SystemMessage,
     UserMessage,
@@ -39,15 +30,34 @@ from autogen_core.models import (
 from autogen_core.tools import BaseTool, FunctionTool, StaticWorkbench, Workbench
 from pydantic import BaseModel, Field
 
+from autogen_agentchat.agents._base_chat_agent import BaseChatAgent
+from autogen_agentchat.base import Response
+from autogen_agentchat.messages import (
+    BaseAgentEvent,
+    BaseChatMessage,
+    MemoryQueryEvent,
+    MessageFactory,
+    ModelClientStreamingChunkEvent,
+    TextMessage,
+    ThoughtEvent,
+    ToolCallExecutionEvent,
+    ToolCallRequestEvent,
+    ToolCallSummaryMessage,
+)
+from autogen_agentchat.state import BaseState
+from autogen_agentchat.utils import remove_images
+
 # Import the file message types
-from ..types.messages import (
-    ExcelMessage,
+# Assuming the modified message types from the previous artifact
+from aiplanet_core.types.messages import (
     FileMessage,
-    ImageMessage,
-    JSONMessage,
     PDFMessage,
-    PDFWithOCRMessage,
-    register_file_message_types,
+    PDFWithOCRMessage, 
+    JSONMessage,
+    ImageMessage,
+    ExcelMessage,
+    FileProcessingEvent,
+    register_file_message_types
 )
 
 # Setup logging
@@ -70,6 +80,7 @@ class FileAgentConfig(BaseModel):
     tools: List[ComponentModel] | None = None
     workbench: ComponentModel | None = None
     model_context: ComponentModel | None = None
+    memory: List[ComponentModel] | None = None
     description: str
     system_message: str | None = None
     model_client_stream: bool = False
@@ -79,41 +90,342 @@ class FileAgentConfig(BaseModel):
     file_handlers: Dict[str, str] | None = None  # Custom handlers for file types
     working_directory: str | None = None
     metadata: Dict[str, Any] | None = None
+    reflect_on_tool_use: bool = True  # Default to True for file agent
 
 
 class FileAgent(BaseChatAgent, Component[FileAgentConfig]):
     """An agent that specializes in processing files and answering questions about them.
 
-    The agent can handle various file types including PDFs, images, JSON, and Excel files.
+    The FileAgent can handle various file types including PDFs, images, JSON, and Excel files.
     It automatically extracts content from these files and includes it in responses to user queries.
+    The agent provides built-in tools for file operations and can optionally use OCR for text extraction
+    from images and PDFs.
+
+    Key Features:
+        - Automatic file content extraction for PDFs, images, JSON, and Excel files
+        - Built-in OCR support for text extraction from images and scanned PDFs
+        - Configurable extraction depth for handling large files
+        - Memory integration for context-aware file processing
+        - Tool integration for enhanced file operations
+        - Progress tracking through FileProcessingEvent messages
 
     Args:
         name (str): The name of the agent.
         model_client (ChatCompletionClient): The model client to use for inference.
-        tools (List[BaseTool[Any, Any] | Callable[..., Any] | Callable[..., Awaitable[Any]]] | None, optional):
-            Additional tools to register with the agent.
+        tools (List[BaseTool[Any, Any]] | None, optional): 
+            Additional tools to register with the agent. These will be combined with built-in file tools.
         workbench (Workbench | None, optional): The workbench to use for the agent.
+            Cannot be used together with the tools parameter.
         model_context (ChatCompletionContext | None, optional): The model context for storing and retrieving messages.
+            Defaults to UnboundedChatCompletionContext if not specified.
+        memory (Sequence[Memory] | None, optional): The memory store to use for the agent. 
+            Enables context-aware processing across conversations.
         description (str, optional): The description of the agent.
+            Defaults to "An agent that specializes in processing and analyzing files".
         system_message (str, optional): The system message for the model.
+            Provides instructions for file processing behavior.
         model_client_stream (bool, optional): Whether to use streaming for model responses.
-        supported_file_types (List[str] | None, optional): List of file extensions to support (e.g., ["pdf", "json"]).
-            If None, all supported file types are enabled.
+            Defaults to False.
+        supported_file_types (List[str] | None, optional): List of file extensions to support 
+            (e.g., ["pdf", "json", "xlsx", "png"]). If None, all supported file types are enabled.
         ocr_enabled (bool, optional): Whether to enable OCR for images and PDFs.
+            Requires additional OCR dependencies. Defaults to False.
         extraction_depth (int, optional): How deeply to extract content from files (1-3).
+            Higher values extract more detailed content but may be slower. Defaults to 1.
         file_handlers (Dict[str, str] | None, optional): Custom handlers for specific file types.
-        working_directory (str | None, optional): Directory for file operations. Defaults to current directory.
+            Maps file extensions or MIME types to handler method names.
+        working_directory (str | None, optional): Directory for file operations. 
+            Defaults to current working directory.
+        reflect_on_tool_use (bool, optional): If True, the agent will make another model inference 
+            using the tool call results to generate a response. Defaults to True.
         metadata (Dict[str, Any] | None, optional): Additional metadata for the agent.
+
+    Raises:
+        ValueError: If tool names are not unique or if tools are used with a workbench.
+        TypeError: If memory parameter is not the correct type.
+
+    Examples:
+
+        **Basic File Processing Agent:**
+
+        .. code-block:: python
+
+            import asyncio
+            from autogen_ext.models.openai import OpenAIChatCompletionClient
+            from aiplanet_core.agents import FileAgent
+            from autogen_agentchat.ui import Console
+            from aiplanet_core.types.messages import (
+                ExcelMessage,
+                FileMessage,
+                ImageMessage,
+                JSONMessage,
+                PDFMessage,
+                PDFWithOCRMessage,
+                register_file_message_types,
+            )
+
+
+            async def main() -> None:
+                model_client = OpenAIChatCompletionClient(model="gpt-4o")
+                
+                # Create a basic file processing agent
+                file_agent = FileAgent(
+                    name="file_processor",
+                    model_client=model_client,
+                    description="Specialized agent for processing and analyzing files"
+                )
+
+                json_message = JSONMessage(
+                    source="user",
+                    filepath=json_file_path,
+                    filename="sample.json",
+                    filetype="json"
+                )
+
+                pdf_message = PDFMessage(
+                    source="user",
+                    filepath="sample.pdf",
+                    filename=pdf_file_path,
+                    filetype="application/pdf"
+                )
+
+                excel_message = ExcelMessage(
+                    source="user",
+                    filepath=file_path,
+                    filename=sample.csv,
+                    filetype="csv"
+                )
+
+                file_message = FileMessage(
+                    source="user",
+                    filepath=file_path,
+                    filename=filename,
+                    filetype=file_extension.lstrip(".")
+                )
+
+                image_message = ImageMessage(
+                    source="user",
+                    filepath=image_path,
+                    filename=image_name,
+                    filetype=image_extension.lstrip(".")
+                )
+
+                pdf_ocr_message = PDFWithOCRMessage(
+                    source="user",
+                    filepath=pdf_path,
+                    filename=pdf_name,
+                    filetype="application/pdf",
+                    ocr_language="eng"
+                )
+
+                messages = [json_message, pdf_message, excel_message, file_message, image_message, pdf_ocr_message]
+                
+                # Use the agent to analyze files
+                result = await file_agent.run(
+                    task=messages
+                )
+                print(result.messages[-1].content)
+
+
+            asyncio.run(main())
+
+        **File Agent with OCR and Custom Tools:**
+
+        .. code-block:: python
+
+            import asyncio
+            from autogen_ext.models.openai import OpenAIChatCompletionClient
+            from aiplanet_core.agents import FileAgent
+            from autogen_agentchat.ui import Console
+            from autogen_core.tools import FunctionTool
+
+
+            async def custom_file_validator(filepath: str) -> str:
+                \"\"\"Custom tool to validate file integrity.\"\"\"
+                # Implementation would check file validity
+                return f"File {filepath} is valid and ready for processing."
+
+
+            async def main() -> None:
+                model_client = OpenAIChatCompletionClient(model="gpt-4o")
+                
+                # Create custom tools
+                validator_tool = FunctionTool(
+                    custom_file_validator,
+                    description="Validate file integrity before processing"
+                )
+                
+                # Create file agent with OCR and custom tools
+                file_agent = FileAgent(
+                    name="advanced_file_processor",
+                    model_client=model_client,
+                    tools=[validator_tool],
+                    ocr_enabled=True,  # Enable OCR for images and PDFs
+                    extraction_depth=2,  # More detailed extraction
+                    working_directory="./documents",
+                    system_message="You are an advanced file processor with OCR capabilities. 
+                    Always validate files before processing and provide detailed analysis."
+                )
+                
+                # Process files with OCR
+                await Console(
+                    file_agent.run_stream(
+                        task="Extract text from the scanned document and analyze its contents."
+                    )
+                )
+
+
+            asyncio.run(main())
+
+        **File Agent in a Team Environment:**
+
+        .. code-block:: python
+
+            import asyncio
+            from autogen_ext.models.openai import OpenAIChatCompletionClient
+            from autogen_agentchat.agents import FileAgent, AssistantAgent
+            from autogen_agentchat.teams import RoundRobinGroupChat
+            from autogen_agentchat.conditions import MaxMessageTermination
+            from autogen_agentchat.ui import Console
+
+
+            async def main() -> None:
+                model_client = OpenAIChatCompletionClient(model="gpt-4o")
+                
+                # Create a file processing agent
+                file_agent = FileAgent(
+                    name="file_analyst",
+                    model_client=model_client,
+                    ocr_enabled=True,
+                    extraction_depth=3,
+                    system_message="Extract and analyze file contents. Focus on data extraction and summarization."
+                )
+                
+                # Create a report writer agent
+                report_agent = AssistantAgent(
+                    name="report_writer",
+                    model_client=model_client,
+                    system_message="Create comprehensive reports based on file analysis results."
+                )
+                
+                # Create a team
+                termination = MaxMessageTermination(6)
+                team = RoundRobinGroupChat(
+                    [file_agent, report_agent],
+                    termination_condition=termination
+                )
+                
+                # Run the team to process files and generate reports
+                await Console(
+                    team.run_stream(
+                        task="Please process the uploaded financial documents and create a summary report."
+                    )
+                )
+
+
+            asyncio.run(main())
+
+        **File Agent with Memory Integration:**
+
+        .. code-block:: python
+
+            import asyncio
+            from autogen_ext.models.openai import OpenAIChatCompletionClient
+            from aiplanet_core.agents import FileAgent
+            from autogen_core.memory import ListMemory, MemoryContent
+            from autogen_agentchat.ui import Console
+
+
+            async def main() -> None:
+                model_client = OpenAIChatCompletionClient(model="gpt-4o")
+                
+                # Create memory with some initial context
+                memory = ListMemory()
+                await memory.add(MemoryContent(
+                    content="Previously processed files showed quarterly revenue trends.",
+                    mime_type="text/plain"
+                ))
+                
+                # Create file agent with memory
+                file_agent = FileAgent(
+                    name="contextual_file_processor",
+                    model_client=model_client,
+                    memory=[memory],
+                    extraction_depth=2,
+                    system_message="You process files while considering previous analysis context.
+                    Always relate new findings to previous insights when relevant."
+                )
+                
+                # Process files with contextual awareness
+                result = await file_agent.run(
+                    task="Analyze this new financial report and compare it with previous trends."
+                )
+                print(result.messages[-1].content)
+
+
+            asyncio.run(main())
+
+        **Custom File Handler Example:**
+
+        .. code-block:: python
+
+            import asyncio
+            from autogen_ext.models.openai import OpenAIChatCompletionClient
+            from aiplanet_core.agents import FileAgent
+
+
+            class CustomFileAgent(FileAgent):
+                \"\"\"Extended FileAgent with custom file handlers.\"\"\"
+                
+                async def handle_csv_file(self, msg):
+                    \"\"\"Custom handler for CSV files.\"\"\"
+                    # Custom CSV processing logic
+                    return f"Processed CSV file: {msg.filename} with custom logic"
+                
+                async def handle_xml_file(self, msg):
+                    \"\"\"Custom handler for XML files.\"\"\"
+                    # Custom XML processing logic
+                    return f"Processed XML file: {msg.filename} with custom logic"
+
+
+            async def main() -> None:
+                model_client = OpenAIChatCompletionClient(model="gpt-4o")
+                
+                # Create agent with custom file handlers
+                file_agent = CustomFileAgent(
+                    name="custom_file_processor",
+                    model_client=model_client,
+                    file_handlers={
+                        "csv": "handle_csv_file",
+                        "xml": "handle_xml_file"
+                    },
+                    system_message="You can process various file types including CSV and XML "
+                                  "with specialized handlers."
+                )
+                
+                result = await file_agent.run(
+                    task="Process the uploaded data files and extract key information."
+                )
+                print(result.messages[-1].content)
+
+
+            asyncio.run(main())
+
+    Note:
+        The FileAgent automatically registers file message types with its internal MessageFactory.
+        When processing files, the agent yields FileProcessingEvent messages to track progress.
+        OCR functionality requires additional dependencies (like pytesseract) to be installed.
+        
     """
 
     component_config_schema = FileAgentConfig
     component_provider_override = "autogen_agentchat.agents.FileAgent"
 
     DEFAULT_SYSTEM_MESSAGE = """You are a File Processing Assistant that specializes in extracting and analyzing information from various file types.
-You can work with PDFs, images, JSON files, Excel spreadsheets, and more. 
-When provided with files, you'll automatically extract their contents and help answer questions about them.
-For images and PDFs, you can extract text using OCR if needed.
-Always be specific about what you find in the files and cite the source when answering questions."""
+    You can work with PDFs, images, JSON files, Excel spreadsheets, and more. 
+    When provided with files, you'll automatically extract their contents and help answer questions about them.
+    For images and PDFs, you can extract text using OCR if needed.
+    Always be specific about what you find in the files and cite the source when answering questions."""
 
     def __init__(
         self,
@@ -123,6 +435,7 @@ Always be specific about what you find in the files and cite the source when ans
         tools: List[BaseTool[Any, Any]] | None = None,
         workbench: Workbench | None = None,
         model_context: ChatCompletionContext | None = None,
+        memory: Sequence[Memory] | None = None,
         description: str = "An agent that specializes in processing and analyzing files",
         system_message: str | None = DEFAULT_SYSTEM_MESSAGE,
         model_client_stream: bool = False,
@@ -131,6 +444,7 @@ Always be specific about what you find in the files and cite the source when ans
         extraction_depth: int = 1,
         file_handlers: Dict[str, str] | None = None,
         working_directory: str | None = None,
+        reflect_on_tool_use: bool = True,
         metadata: Dict[str, Any] | None = None,
     ):
         super().__init__(name=name, description=description)
@@ -143,6 +457,15 @@ Always be specific about what you find in the files and cite the source when ans
         self._file_handlers = file_handlers or {}
         self._working_directory = working_directory or os.getcwd()
         self._processed_files: List[str] = []
+        self._reflect_on_tool_use = reflect_on_tool_use
+
+        # Initialize memory
+        self._memory = None
+        if memory is not None:
+            if isinstance(memory, list):
+                self._memory = memory
+            else:
+                raise TypeError(f"Expected Memory, List[Memory], or None, got {type(memory)}")
 
         # Initialize the message factory with file message types
         self._message_factory = MessageFactory()
@@ -161,7 +484,7 @@ Always be specific about what you find in the files and cite the source when ans
                     self._tools.append(tool)
                 else:
                     raise ValueError(f"Unsupported tool type: {type(tool)}")
-
+            
             # Check if tool names are unique
             tool_names = [tool.name for tool in self._tools]
             if len(tool_names) != len(set(tool_names)):
@@ -186,52 +509,55 @@ Always be specific about what you find in the files and cite the source when ans
 
     def _setup_file_tools(self):
         """Set up tools for file operations."""
-
+        
         async def list_files(directory: str = "") -> str:
             """List files in the specified directory or the working directory."""
             target_dir = os.path.join(self._working_directory, directory) if directory else self._working_directory
             if not os.path.exists(target_dir):
                 return f"Error: Directory {target_dir} does not exist."
-
+            
             files = os.listdir(target_dir)
             return json.dumps({"files": files})
-
+        
         async def extract_text_from_pdf(filepath: str) -> str:
             """Extract text from a PDF file."""
             full_path = os.path.join(self._working_directory, filepath)
             if not os.path.exists(full_path):
                 return f"Error: File {filepath} does not exist."
-
+            
             try:
                 # Create a PDF message and extract text
                 pdf_msg = PDFMessage(
-                    source=self.name, filepath=full_path, filename=os.path.basename(full_path), filetype="pdf"
+                    source=self.name, 
+                    filepath=full_path, 
+                    filename=os.path.basename(full_path),
+                    filetype="pdf"
                 )
                 text = await pdf_msg.extract_text()
                 return text
             except Exception as e:
                 return f"Error extracting text from PDF: {str(e)}"
-
+                
         async def apply_ocr_to_image(filepath: str, language: str = "") -> str:
             """Apply OCR to an image or PDF file."""
             if not self._ocr_enabled:
                 return "Error: OCR is not enabled for this agent."
-
+                
             full_path = os.path.join(self._working_directory, filepath)
             if not os.path.exists(full_path):
                 return f"Error: File {filepath} does not exist."
-
+                
             try:
                 # Determine file type
                 ext = os.path.splitext(filepath)[1].lower()
-                if ext == ".pdf":
+                if ext == '.pdf':
                     # Use PDFWithOCRMessage for PDFs
                     msg = PDFWithOCRMessage(
                         source=self.name,
                         filepath=full_path,
                         filename=os.path.basename(full_path),
                         filetype="pdf",
-                        ocr_language=language if language else None,
+                        ocr_language=language if language else None
                     )
                     text = await msg.extract_text()
                 else:
@@ -240,40 +566,46 @@ Always be specific about what you find in the files and cite the source when ans
                         source=self.name,
                         filepath=full_path,
                         filename=os.path.basename(full_path),
-                        filetype=ext.lstrip("."),
+                        filetype=ext.lstrip('.')
                     )
                     text = await msg.ocr_extract_text(language if language else None)
-
+                
                 return text
             except Exception as e:
                 return f"Error applying OCR: {str(e)}"
-
+                
         async def get_json_content(filepath: str) -> str:
             """Get the content of a JSON file."""
             full_path = os.path.join(self._working_directory, filepath)
             if not os.path.exists(full_path):
                 return f"Error: File {filepath} does not exist."
-
+                
             try:
                 msg = JSONMessage(
-                    source=self.name, filepath=full_path, filename=os.path.basename(full_path), filetype="json"
+                    source=self.name,
+                    filepath=full_path,
+                    filename=os.path.basename(full_path),
+                    filetype="json"
                 )
                 content = await msg.get_content()
                 return json.dumps(content, indent=2)
             except Exception as e:
                 return f"Error getting JSON content: {str(e)}"
-
+                
         async def get_excel_data(filepath: str, sheet_name: str = "") -> str:
             """Get data from an Excel file, optionally specifying a sheet name."""
             full_path = os.path.join(self._working_directory, filepath)
             if not os.path.exists(full_path):
                 return f"Error: File {filepath} does not exist."
-
+                
             try:
                 msg = ExcelMessage(
-                    source=self.name, filepath=full_path, filename=os.path.basename(full_path), filetype="xlsx"
+                    source=self.name,
+                    filepath=full_path,
+                    filename=os.path.basename(full_path),
+                    filetype="xlsx"
                 )
-
+                
                 data_dict = await msg.to_dict()
                 if sheet_name and sheet_name in data_dict:
                     return json.dumps(data_dict[sheet_name], indent=2)
@@ -281,17 +613,15 @@ Always be specific about what you find in the files and cite the source when ans
                     return json.dumps(data_dict, indent=2)
             except Exception as e:
                 return f"Error getting Excel data: {str(e)}"
-
+        
         # Add file operation tools
-        self._tools.extend(
-            [
-                FunctionTool(list_files, description="List files in a directory"),
-                FunctionTool(extract_text_from_pdf, description="Extract text from a PDF file"),
-                FunctionTool(get_json_content, description="Get content from a JSON file"),
-                FunctionTool(get_excel_data, description="Get data from an Excel file"),
-            ]
-        )
-
+        self._tools.extend([
+            FunctionTool(list_files, description="List files in a directory"),
+            FunctionTool(extract_text_from_pdf, description="Extract text from a PDF file"),
+            FunctionTool(get_json_content, description="Get content from a JSON file"),
+            FunctionTool(get_excel_data, description="Get data from an Excel file"),
+        ])
+        
         # Add OCR tool if enabled
         if self._ocr_enabled:
             self._tools.append(FunctionTool(apply_ocr_to_image, description="Apply OCR to an image or PDF file"))
@@ -299,7 +629,7 @@ Always be specific about what you find in the files and cite the source when ans
     @property
     def produced_message_types(self) -> Sequence[type[BaseChatMessage]]:
         """The types of messages that the agent produces."""
-        return (
+        message_types = [
             TextMessage,
             FileMessage,
             PDFMessage,
@@ -307,7 +637,13 @@ Always be specific about what you find in the files and cite the source when ans
             JSONMessage,
             ImageMessage,
             ExcelMessage,
-        )
+            FileProcessingEvent
+        ]
+        
+        if self._tools:
+            message_types.append(ToolCallSummaryMessage)
+            
+        return tuple(message_types)
 
     @property
     def model_context(self) -> ChatCompletionContext:
@@ -325,57 +661,98 @@ Always be specific about what you find in the files and cite the source when ans
         self, messages: Sequence[BaseChatMessage], cancellation_token: CancellationToken
     ) -> AsyncGenerator[BaseAgentEvent | BaseChatMessage | Response, None]:
         """Process incoming messages and yield events/responses as they happen."""
-
+        
         # Gather all relevant state
         agent_name = self.name
         model_context = self._model_context
+        memory = self._memory
         system_messages = self._system_messages
         workbench = self._workbench
         model_client = self._model_client
         model_client_stream = self._model_client_stream
+        reflect_on_tool_use = self._reflect_on_tool_use
+        
+        # STEP 1: Add new messages to the model context
+        await self._add_messages_to_context(
+            model_context=model_context,
+            messages=messages,
+        )
 
-        # STEP 1: Process and extract information from any file messages
+        # STEP 2: Update model context with any relevant memory
         inner_messages: List[BaseAgentEvent | BaseChatMessage] = []
+        for event_msg in await self._update_model_context_with_memory(
+            memory=memory,
+            model_context=model_context,
+            agent_name=agent_name,
+        ):
+            inner_messages.append(event_msg)
+            yield event_msg
+        
+        # STEP 3: Process and extract information from any file messages
         extracted_content: List[str] = []
-
+        
         for msg in messages:
-            # Add message to model context
-            await model_context.add_message(msg.to_model_message())
-
             # Process file messages
             if isinstance(msg, (FileMessage, PDFMessage, PDFWithOCRMessage, JSONMessage, ImageMessage, ExcelMessage)):
-                extracted_info = await self._process_file_message(msg)
+                extracted_info, processing_events = await self._process_file_message(msg)
+                # Yield each file processing event
+                for event in processing_events:
+                    inner_messages.append(event)
+                    yield event
+    
                 if extracted_info:
                     extracted_content.append(extracted_info)
                     # Add the file to processed files list if not already there
-                    if hasattr(msg, "filepath") and msg.filepath not in self._processed_files:
+                    if hasattr(msg, 'filepath') and msg.filepath not in self._processed_files:
                         self._processed_files.append(msg.filepath)
-
-        # STEP 2: If content was extracted, add it to the model context
+        
+        # If content was extracted, add it to the model context
         if extracted_content:
             file_content_msg = UserMessage(
-                content="File content:\n\n" + "\n\n".join(extracted_content), source="file_extractor"
+                content=f"File content:\n\n" + "\n\n".join(extracted_content),
+                source="file_extractor"
             )
             await model_context.add_message(file_content_msg)
-
-        # STEP 3: Run the model inference
+        
+        # STEP 4: Run the model inference
         model_result = None
-        async for inference_output in self._call_llm(
-            model_client=model_client,
-            model_client_stream=model_client_stream,
-            system_messages=system_messages,
-            model_context=model_context,
-            workbench=workbench,
-            agent_name=agent_name,
-            cancellation_token=cancellation_token,
-        ):
-            if isinstance(inference_output, CreateResult):
-                model_result = inference_output
-            else:
-                # Streaming chunk event
-                yield inference_output
+        try:
+            async for inference_output in self._call_llm(
+                model_client=model_client,
+                model_client_stream=model_client_stream,
+                system_messages=system_messages,
+                model_context=model_context,
+                workbench=workbench,
+                agent_name=agent_name,
+                cancellation_token=cancellation_token,
+            ):
+                if isinstance(inference_output, CreateResult):
+                    model_result = inference_output
+                else:
+                    # Streaming chunk event
+                    yield inference_output
+        except Exception as e:
+            # Handle any exceptions during model inference
+            error_msg = f"Error during model inference: {str(e)}"
+            yield Response(
+                chat_message=TextMessage(
+                    content=error_msg,
+                    source=agent_name,
+                ),
+                inner_messages=inner_messages,
+            )
+            return
 
-        assert model_result is not None, "No model result was produced."
+        # Ensure we have a model result
+        if model_result is None:
+            yield Response(
+                chat_message=TextMessage(
+                    content="No response was generated by the model.",
+                    source=agent_name,
+                ),
+                inner_messages=inner_messages,
+            )
+            return
 
         # If the model produced a thought, yield it as an event
         if model_result.thought:
@@ -392,14 +769,9 @@ Always be specific about what you find in the files and cite the source when ans
             )
         )
 
-        # STEP 4: If model returns function calls, execute them
-        if isinstance(model_result.content, list):
-            # This is a list of function calls
-            # Implementation for function calls would go here, similar to AssistantAgent
-            pass
-        else:
+        # STEP 5: Process the model output - either direct response or function calls
+        if isinstance(model_result.content, str):
             # Direct text response
-            assert isinstance(model_result.content, str)
             yield Response(
                 chat_message=TextMessage(
                     content=model_result.content,
@@ -408,27 +780,215 @@ Always be specific about what you find in the files and cite the source when ans
                 ),
                 inner_messages=inner_messages,
             )
+        elif isinstance(model_result.content, list) and all(isinstance(item, FunctionCall) for item in model_result.content):
+            # Function call processing
+            
+            # STEP 5A: Yield ToolCallRequestEvent
+            tool_call_msg = ToolCallRequestEvent(
+                content=model_result.content,
+                source=agent_name,
+                models_usage=model_result.usage,
+            )
+            inner_messages.append(tool_call_msg)
+            yield tool_call_msg
 
-    async def _process_file_message(self, msg: BaseChatMessage) -> str:
-        """Process a file message and extract its content."""
-        if isinstance(msg, PDFMessage):
-            return await self._process_pdf_message(msg)
-        elif isinstance(msg, PDFWithOCRMessage):
-            return await self._process_pdf_ocr_message(msg)
-        elif isinstance(msg, JSONMessage):
-            return await self._process_json_message(msg)
-        elif isinstance(msg, ImageMessage):
-            return await self._process_image_message(msg)
-        elif isinstance(msg, ExcelMessage):
-            return await self._process_excel_message(msg)
-        elif isinstance(msg, FileMessage):
-            return f"File received: {msg.filename} (type: {msg.filetype})"
-        return ""
+            # STEP 5B: Execute tool calls
+            executed_calls_and_results = await asyncio.gather(
+                *[
+                    self._execute_tool_call(
+                        tool_call=call,
+                        workbench=workbench,
+                        agent_name=agent_name,
+                        cancellation_token=cancellation_token,
+                    )
+                    for call in model_result.content
+                ]
+            )
+            exec_results = [result for _, result in executed_calls_and_results]
 
-    async def _process_pdf_message(self, msg: PDFMessage) -> str:
+            # Yield ToolCallExecutionEvent
+            tool_call_result_msg = ToolCallExecutionEvent(
+                content=exec_results,
+                source=agent_name,
+            )
+            await model_context.add_message(FunctionExecutionResultMessage(content=exec_results))
+            inner_messages.append(tool_call_result_msg)
+            yield tool_call_result_msg
+
+            # STEP 5C: Reflect or summarize tool results
+            if reflect_on_tool_use:
+                async for reflection_response in self._reflect_on_tool_use_flow(
+                    system_messages=system_messages,
+                    model_client=model_client,
+                    model_client_stream=model_client_stream,
+                    model_context=model_context,
+                    agent_name=agent_name,
+                    inner_messages=inner_messages,
+                ):
+                    yield reflection_response
+            else:
+                yield self._summarize_tool_use(
+                    executed_calls_and_results=executed_calls_and_results,
+                    inner_messages=inner_messages,
+                    agent_name=agent_name,
+                )
+        else:
+            # Unexpected content type
+            yield Response(
+                chat_message=TextMessage(
+                    content=f"Unexpected model response format: {type(model_result.content)}",
+                    source=agent_name,
+                ),
+                inner_messages=inner_messages,
+            )
+
+    @staticmethod
+    async def _add_messages_to_context(
+        model_context: ChatCompletionContext,
+        messages: Sequence[BaseChatMessage],
+    ) -> None:
+        """Add incoming messages to the model context."""
+        for msg in messages:
+            await model_context.add_message(msg.to_model_message())
+
+    @staticmethod
+    async def _update_model_context_with_memory(
+        memory: Optional[Sequence[Memory]],
+        model_context: ChatCompletionContext,
+        agent_name: str,
+    ) -> List[MemoryQueryEvent]:
+        """If memory modules are present, update the model context and return the events produced."""
+        events: List[MemoryQueryEvent] = []
+        if memory:
+            for mem in memory:
+                update_context_result = await mem.update_context(model_context)
+                if update_context_result and len(update_context_result.memories.results) > 0:
+                    memory_query_event_msg = MemoryQueryEvent(
+                        content=update_context_result.memories.results,
+                        source=agent_name,
+                    )
+                    events.append(memory_query_event_msg)
+        return events
+
+    async def _process_file_message(self, msg: BaseChatMessage) -> tuple[str, List[FileProcessingEvent]]:
+        """Process a file message and extract its content, yielding progress events."""
+        events: List[FileProcessingEvent] = []
+        result = ""
+        
+        # Initialize a processing event
+        if hasattr(msg, 'filename') and hasattr(msg, 'filetype'):
+            filename = getattr(msg, 'filename', 'unknown file')
+            filetype = getattr(msg, 'filetype', 'unknown')
+            
+            # Create and add the initial event
+            start_event = FileProcessingEvent(
+                source=self.name,
+                filename=filename,
+                operation=f"processing {filetype} file",
+                status="started",
+                content=f"Extract content from File: {self.name}"
+            )
+            events.append(start_event)
+            
+            # Check for custom handler based on file extension and mime type
+            if hasattr(msg, 'filepath'):
+                file_ext = os.path.splitext(msg.filepath)[1].lower().lstrip('.')
+                mime_type = getattr(msg, 'filetype', '')
+                
+                # Check if we have a custom handler for this file type
+                handler_name = None
+                if file_ext in self._file_handlers:
+                    handler_name = self._file_handlers[file_ext]
+                elif mime_type in self._file_handlers:
+                    handler_name = self._file_handlers[mime_type]
+                
+                # If we have a handler, use it
+                if handler_name and hasattr(self, handler_name):
+                    handler = getattr(self, handler_name)
+                    try:
+                        # Call the handler and collect its output
+                        result = await handler(msg)
+                        
+                        # Create a completion event
+                        complete_event = FileProcessingEvent(
+                            source=self.name,
+                            filename=filename,
+                            operation=f"processing {filetype} file",
+                            status="completed",
+                            content=f"Extract content from File: {self.name}"
+                        )
+                        events.append(complete_event)
+                    except Exception as e:
+                        # Create a failure event
+                        fail_event = FileProcessingEvent(
+                            source=self.name,
+                            filename=filename,
+                            operation=f"processing {filetype} file",
+                            status="failed",
+                            content=str(e)
+                        )
+                        events.append(fail_event)
+                        result = f"Error processing {filename}: {str(e)}"
+            
+            # Process specific file types
+            if result == "" and hasattr(msg, 'content'):
+                if isinstance(msg, PDFMessage):
+                    result, pdf_events = await self._process_pdf_message(msg)
+                    events.extend(pdf_events)
+                elif isinstance(msg, PDFWithOCRMessage):
+                    result, pdf_ocr_events = await self._process_pdf_ocr_message(msg)
+                    events.extend(pdf_ocr_events)
+                elif isinstance(msg, JSONMessage):
+                    result, json_events = await self._process_json_message(msg)
+                    events.extend(json_events)
+                elif isinstance(msg, ImageMessage):
+                    result, image_events = await self._process_image_message(msg)
+                    events.extend(image_events)
+                elif isinstance(msg, ExcelMessage):
+                    result, excel_events = await self._process_excel_message(msg)
+                    events.extend(excel_events)
+                elif isinstance(msg, FileMessage):
+                    result = f"File received: {msg.filename} (type: {msg.filetype})"
+                    # Just create a completion event since this is a simple operation
+                    complete_event = FileProcessingEvent(
+                        source=self.name,
+                        filename=filename,
+                        operation="receiving file",
+                        status="completed"
+                    )
+                    events.append(complete_event)
+        
+        return result, events
+
+    async def _process_pdf_message(self, msg: PDFMessage) -> tuple[str, List[FileProcessingEvent]]:
         """Process a PDF message."""
+        events = []
         try:
-            text = await msg.extract_text()
+            # Create a processing event
+            start_event = FileProcessingEvent(
+                source=self.name,
+                filename=msg.filename,
+                operation="extracting text from PDF",
+                status="started",
+                content=f"Extract content from File: {self.name}"
+            )
+            events.append(start_event)
+            
+            # Use the get_content method to ensure we have text content
+            text = await msg.get_content()
+            
+            # Update with progress event for long PDFs
+            if msg.page_count and msg.page_count > 10:
+                progress_event = FileProcessingEvent(
+                    source=self.name,
+                    filename=msg.filename,
+                    operation="extracting text from PDF",
+                    status="in_progress",
+                    progress=0.5,
+                    content=f"Processing {msg.page_count} pages"
+                )
+                events.append(progress_event)
+            
             meta_info = f"PDF: {msg.filename}"
             if msg.page_count:
                 meta_info += f" ({msg.page_count} pages)"
@@ -436,77 +996,202 @@ Always be specific about what you find in the files and cite the source when ans
                 meta_info += f", Title: {msg.title}"
             if msg.author:
                 meta_info += f", Author: {msg.author}"
-
+                
             # For long PDFs, we might want to truncate or summarize
-            if len(text) > 8000 and self._extraction_depth < 3:
+            if isinstance(text, str) and len(text) > 8000 and self._extraction_depth < 3:
                 text = text[:8000] + "...[truncated]"
-
-            return f"{meta_info}\n\n{text}"
+                
+            # Create completion event
+            complete_event = FileProcessingEvent(
+                source=self.name,
+                filename=msg.filename,
+                operation="extracting text from PDF",
+                status="completed",
+                content=f"Extracted {len(text) if isinstance(text, str) else 'N/A'} characters"
+            )
+            events.append(complete_event)
+                
+            return f"{meta_info}\n\n{text}", events
         except Exception as e:
-            return f"Error processing PDF {msg.filename}: {str(e)}"
+            # Create failure event
+            fail_event = FileProcessingEvent(
+                source=self.name,
+                filename=msg.filename,
+                operation="extracting text from PDF",
+                status="failed",
+                content=str(e)
+            )
+            events.append(fail_event)
+            return f"Error processing PDF {msg.filename}: {str(e)}", events
 
     async def _process_pdf_ocr_message(self, msg: PDFWithOCRMessage) -> str:
         """Process a PDF with OCR message."""
+        events = []
         try:
-            # If OCR has been applied, use OCR text; otherwise, extract regular text
-            if msg.ocr_applied and msg.ocr_text:
-                text = msg.ocr_text
-            else:
-                text = await msg.extract_text()
-
+            # Create a processing event
+            start_event = FileProcessingEvent(
+                source=self.name,
+                filename=msg.filename,
+                operation="extracting text from PDF",
+                status="started",
+                content=f"Extract content from File: {self.name}"
+            )
+            events.append(start_event)
+            # Use get_content which will prioritize OCR text if available
+            text = await msg.get_content()
+            # Create completion event
+            complete_event = FileProcessingEvent(
+                source=self.name,
+                filename=msg.filename,
+                operation="extracting text from PDF",
+                status="completed",
+                content=f"Extracted {len(text) if isinstance(text, str) else 'N/A'} characters"
+            )
+            events.append(complete_event)
+                
             meta_info = f"PDF with OCR: {msg.filename}"
             if msg.page_count:
                 meta_info += f" ({msg.page_count} pages)"
-
+                
             # For long PDFs, truncate if needed
-            if len(text) > 8000 and self._extraction_depth < 3:
+            if isinstance(text, str) and len(text) > 8000 and self._extraction_depth < 3:
                 text = text[:8000] + "...[truncated]"
-
-            return f"{meta_info}\n\n{text}"
+                
+            return f"{meta_info}\n\n{text}", events
         except Exception as e:
-            return f"Error processing PDF with OCR {msg.filename}: {str(e)}"
+            # Create failure event
+            fail_event = FileProcessingEvent(
+                source=self.name,
+                filename=msg.filename,
+                operation="extracting text from PDF",
+                status="failed",
+                content=str(e)
+            )
+            events.append(fail_event)
+            return f"Error processing PDF with OCR {msg.filename}: {str(e)}", events
 
     async def _process_json_message(self, msg: JSONMessage) -> str:
         """Process a JSON message."""
+        events = []
         try:
+            # Create a processing event
+            start_event = FileProcessingEvent(
+                source=self.name,
+                filename=msg.filename,
+                operation="extracting text from JSON",
+                status="started",
+                content=f"Extract content from File: {self.name}"
+            )
+            events.append(start_event)
+            # Use get_content which returns the parsed JSON data
             content = await msg.get_content()
+            
             # Format JSON content as a string
             formatted_content = json.dumps(content, indent=2)
-
+            
+            if formatted_content is not None:
+                progress_event = FileProcessingEvent(
+                    source=self.name,
+                    filename=msg.filename,
+                    operation="extracting text from JSON",
+                    status="in_progress",
+                    progress=0.5,
+                    content=f"Processing {msg.filetype} file"
+                )
+                events.append(progress_event)
             # For large JSON files, truncate based on extraction depth
             if len(formatted_content) > 5000 and self._extraction_depth < 2:
                 formatted_content = formatted_content[:5000] + "...[truncated]"
 
-            return f"JSON File: {msg.filename}\n\n{formatted_content}"
+            # Create completion event
+            complete_event = FileProcessingEvent(
+                source=self.name,
+                filename=msg.filename,
+                operation="extracting text from JSON",
+                status="completed",
+                content=f"Extracted {len(formatted_content) if isinstance(formatted_content, str) else 'N/A'} characters"
+            )
+            events.append(complete_event)
+                
+            return f"JSON File: {msg.filename}\n\n{formatted_content}", events
         except Exception as e:
-            return f"Error processing JSON {msg.filename}: {str(e)}"
+            # Create failure event
+            fail_event = FileProcessingEvent(
+                source=self.name,
+                filename=msg.filename,
+                operation="extracting text from JSON",
+                status="failed",
+                content=str(e)
+            )
+            events.append(fail_event)
+            return f"Error processing JSON {msg.filename}: {str(e)}", events
 
     async def _process_image_message(self, msg: ImageMessage) -> str:
         """Process an image message."""
+        events = []
         try:
+            # Create a processing event
+            start_event = FileProcessingEvent(
+                source=self.name,
+                filename=msg.filename,
+                operation="extracting info from Image",
+                status="started",
+                content=f"Extract content from File: {self.name}"
+            )
+            events.append(start_event)
+            # Use get_content which will return OCR text if available
+            content = await msg.get_content()
+            
             meta_info = f"Image: {msg.filename}"
             if msg.width and msg.height:
                 meta_info += f" ({msg.width}x{msg.height})"
-
-            # If OCR is enabled and text has been extracted
-            if self._ocr_enabled and msg.ocr_text:
-                text = msg.ocr_text.strip()
-                if text and not text.startswith("Error") and not text.startswith("Required"):
-                    return f"{meta_info}\n\nText content:\n{text}"
-
-            # If no OCR text is available but OCR is enabled, try extracting it
-            if self._ocr_enabled and not msg.ocr_text:
-                text = await msg.ocr_extract_text()
-                if text and not text.startswith("Error") and not text.startswith("Required"):
-                    return f"{meta_info}\n\nText content:\n{text}"
-
-            return meta_info
+                
+            # If content is a string (OCR text)
+            if isinstance(content, str) and content and not content.startswith("Error") and not content.startswith("Required"):
+                # Create completion event
+                complete_event = FileProcessingEvent(
+                    source=self.name,
+                    filename=msg.filename,
+                    operation="extracting text from JSON",
+                    status="completed",
+                    content=f"Extracted {len(content) if isinstance(content, str) else 'N/A'} characters"
+                )
+                events.append(complete_event)
+                return f"{meta_info}\n\nText content:\n{content}", events
+            elif isinstance(content, dict):
+                # Create completion event
+                complete_event = FileProcessingEvent(
+                    source=self.name,
+                    filename=msg.filename,
+                    operation="extracting text from JSON",
+                    status="completed",
+                    content=f"Extracted {len(content) if isinstance(content, str) else 'N/A'} characters"
+                )
+                events.append(complete_event)
+                # If content is a dictionary (image metadata)
+                return f"{meta_info}", events
+                    
+            return meta_info, events
         except Exception as e:
             return f"Error processing image {msg.filename}: {str(e)}"
 
     async def _process_excel_message(self, msg: ExcelMessage) -> str:
         """Process an Excel message."""
+        events = []
         try:
+            # Create a processing event
+            start_event = FileProcessingEvent(
+                source=self.name,
+                filename=msg.filename,
+                operation="extracting text from Excel",
+                status="started",
+                content=f"Extract content from File: {self.name}"
+
+            )
+            events.append(start_event)
+            # Use get_content to get the Excel data as a dictionary
+            content = await msg.get_content()
+            
             # Get sheet information
             sheet_info = []
             if msg.sheet_names:
@@ -517,28 +1202,44 @@ Always be specific about what you find in the files and cite the source when ans
                         cols = msg.column_count.get(sheet, "?")
                         info += f" ({rows}x{cols})"
                     sheet_info.append(info)
-
+                    
             meta_info = f"Excel File: {msg.filename}"
             if sheet_info:
                 meta_info += f" (Sheets: {', '.join(sheet_info)})"
-
+                
             # Extract data based on extraction depth
-            if self._extraction_depth >= 2:
-                # Convert to dict format for all sheets
-                data_dict = await msg.to_dict()
-
+            if content and self._extraction_depth >= 2:
                 # Format as JSON
-                formatted_data = json.dumps(data_dict, indent=2)
-
+                formatted_data = json.dumps(content, indent=2)
+                
                 # Truncate for very large Excel files
                 if len(formatted_data) > 6000 and self._extraction_depth < 3:
                     formatted_data = formatted_data[:6000] + "...[truncated]"
 
-                return f"{meta_info}\n\n{formatted_data}"
-
-            return meta_info
+                # Create completion event
+                complete_event = FileProcessingEvent(
+                    source=self.name,
+                    filename=msg.filename,
+                    operation="extracting text from Excel",
+                    status="completed",
+                    content=f"Extracted {len(formatted_data) if isinstance(formatted_data, str) else 'N/A'} characters"
+                )
+                events.append(complete_event)
+                    
+                return f"{meta_info}\n\n{formatted_data}", events
+            
+            return meta_info, events
         except Exception as e:
-            return f"Error processing Excel file {msg.filename}: {str(e)}"
+            # Create failure event
+            fail_event = FileProcessingEvent(
+                source=self.name,
+                filename=msg.filename,
+                operation="extracting text from JSON",
+                status="failed",
+                content=str(e)
+            )
+            events.append(fail_event)
+            return f"Error processing excel {msg.filename}: {str(e)}", events
 
     @classmethod
     async def _call_llm(
@@ -554,9 +1255,9 @@ Always be specific about what you find in the files and cite the source when ans
         """Perform a model inference and yield streaming chunks or final result."""
         all_messages = await model_context.get_messages()
         llm_messages = cls._get_compatible_context(model_client=model_client, messages=system_messages + all_messages)
-
+        
         tools = await workbench.list_tools()
-
+        
         if model_client_stream:
             model_result: Optional[CreateResult] = None
             async for chunk in model_client.create_stream(
@@ -580,6 +1281,119 @@ Always be specific about what you find in the files and cite the source when ans
                 cancellation_token=cancellation_token,
             )
             yield model_result
+
+    @staticmethod
+    async def _execute_tool_call(
+        tool_call: FunctionCall,
+        workbench: Workbench,
+        agent_name: str,
+        cancellation_token: CancellationToken,
+    ) -> tuple[FunctionCall, FunctionExecutionResult]:
+        """Execute a single tool call and return the result."""
+        # Load the arguments from the tool call.
+        try:
+            arguments = json.loads(tool_call.arguments)
+        except json.JSONDecodeError as e:
+            return (
+                tool_call,
+                FunctionExecutionResult(
+                    content=f"Error: {e}",
+                    call_id=tool_call.id,
+                    is_error=True,
+                    name=tool_call.name,
+                ),
+            )
+
+        # Handle tool call using workbench
+        result = await workbench.call_tool(
+            name=tool_call.name,
+            arguments=arguments,
+            cancellation_token=cancellation_token,
+        )
+        return (
+            tool_call,
+            FunctionExecutionResult(
+                content=result.to_text(),
+                call_id=tool_call.id,
+                is_error=result.is_error,
+                name=tool_call.name,
+            ),
+        )
+
+    @classmethod
+    async def _reflect_on_tool_use_flow(
+        cls,
+        system_messages: List[SystemMessage],
+        model_client: ChatCompletionClient,
+        model_client_stream: bool,
+        model_context: ChatCompletionContext,
+        agent_name: str,
+        inner_messages: List[BaseAgentEvent | BaseChatMessage],
+    ) -> AsyncGenerator[Response | ModelClientStreamingChunkEvent | ThoughtEvent, None]:
+        """Run another inference based on tool results and yield the final text response."""
+        all_messages = system_messages + await model_context.get_messages()
+        llm_messages = cls._get_compatible_context(model_client=model_client, messages=all_messages)
+
+        reflection_result: Optional[CreateResult] = None
+
+        if model_client_stream:
+            async for chunk in model_client.create_stream(llm_messages):
+                if isinstance(chunk, CreateResult):
+                    reflection_result = chunk
+                elif isinstance(chunk, str):
+                    yield ModelClientStreamingChunkEvent(content=chunk, source=agent_name)
+                else:
+                    raise RuntimeError(f"Invalid chunk type: {type(chunk)}")
+        else:
+            reflection_result = await model_client.create(llm_messages)
+
+        if not reflection_result or not isinstance(reflection_result.content, str):
+            raise RuntimeError("Reflect on tool use produced no valid text response.")
+
+        # If the reflection produced a thought, yield it
+        if reflection_result.thought:
+            thought_event = ThoughtEvent(content=reflection_result.thought, source=agent_name)
+            yield thought_event
+            inner_messages.append(thought_event)
+
+        # Add to context (including thought if present)
+        await model_context.add_message(
+            AssistantMessage(
+                content=reflection_result.content,
+                source=agent_name,
+                thought=getattr(reflection_result, "thought", None),
+            )
+        )
+
+        yield Response(
+            chat_message=TextMessage(
+                content=reflection_result.content,
+                source=agent_name,
+                models_usage=reflection_result.usage,
+            ),
+            inner_messages=inner_messages,
+        )
+
+    @staticmethod
+    def _summarize_tool_use(
+        executed_calls_and_results: List[tuple[FunctionCall, FunctionExecutionResult]],
+        inner_messages: List[BaseAgentEvent | BaseChatMessage],
+        agent_name: str,
+    ) -> Response:
+        """Create a summary message of all tool calls when not using reflection."""
+        tool_call_summaries: List[str] = []
+        for tool_call, tool_call_result in executed_calls_and_results:
+            tool_call_summaries.append(
+                f"{tool_call.name}: {tool_call_result.content}"
+            )
+        tool_call_summary = "\n\n".join(tool_call_summaries)
+        return Response(
+            chat_message=ToolCallSummaryMessage(
+                content=tool_call_summary,
+                source=agent_name,
+            ),
+            inner_messages=inner_messages,
+        )
 
     @staticmethod
     def _get_compatible_context(model_client: ChatCompletionClient, messages: List[LLMMessage]) -> Sequence[LLMMessage]:
@@ -629,6 +1443,7 @@ Always be specific about what you find in the files and cite the source when ans
             tools=None,  # Tools are not serialized as they're part of the workbench
             workbench=self._workbench.dump_component() if self._workbench else None,
             model_context=self._model_context.dump_component(),
+            memory=[memory.dump_component() for memory in self._memory] if self._memory else None,
             description=self.description,
             system_message=self._system_messages[0].content
             if self._system_messages and isinstance(self._system_messages[0].content, str)
@@ -639,6 +1454,7 @@ Always be specific about what you find in the files and cite the source when ans
             extraction_depth=self._extraction_depth,
             file_handlers=self._file_handlers,
             working_directory=self._working_directory,
+            reflect_on_tool_use=self._reflect_on_tool_use,
             metadata=self._metadata,
         )
 
@@ -650,6 +1466,7 @@ Always be specific about what you find in the files and cite the source when ans
             model_client=ChatCompletionClient.load_component(config.model_client),
             workbench=Workbench.load_component(config.workbench) if config.workbench else None,
             model_context=ChatCompletionContext.load_component(config.model_context) if config.model_context else None,
+            memory=[Memory.load_component(memory) for memory in config.memory] if config.memory else None,
             tools=[BaseTool.load_component(tool) for tool in config.tools] if config.tools else None,
             description=config.description,
             system_message=config.system_message,
@@ -659,5 +1476,6 @@ Always be specific about what you find in the files and cite the source when ans
             extraction_depth=config.extraction_depth,
             file_handlers=config.file_handlers,
             working_directory=config.working_directory,
+            reflect_on_tool_use=config.reflect_on_tool_use,
             metadata=config.metadata,
         )
