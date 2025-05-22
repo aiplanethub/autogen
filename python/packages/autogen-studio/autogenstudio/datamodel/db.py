@@ -266,8 +266,19 @@ class BuilderConfigSelection(BaseDBModel, table=True):
     tools: List[str] = Field(default_factory=list, sa_type=JSON)
     knowledgebases: List[str] = Field(default_factory=list, sa_type=JSON)
 
-    gallery_id: int = Field(foreign_key="gallery.id")
-    builder_session_id: int = Field(foreign_key="buildersession.id", ondelete="CASCADE")
+    gallery_id: Optional[int] = Field(
+        nullable=True, foreign_key="gallery.id", ondelete="SET NULL"
+    )
+    builder_session_id: int = Field(
+        nullable=True, foreign_key="buildersession.id", ondelete="CASCADE"
+    )
 
     gallery: "Gallery" = Relationship(back_populates="builder_configs")
     builder_session: BuilderSession = Relationship(back_populates="config")
+
+
+class Prompt(BaseDBModel, table=True):
+    title: str
+    content: str
+    is_deleted: bool = Field(default=False)
+    user_id: Optional[str] = None

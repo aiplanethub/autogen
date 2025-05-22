@@ -11,6 +11,7 @@ from .db import (
     BuilderMessage,
     BuilderSession,
     BuilderRole,
+    Prompt,
 )
 from .types import (
     EnvironmentVariable,
@@ -52,4 +53,6 @@ __all__ = [
     "BuilderSession",
     "BuilderMessage",
     "BuilderConfigSelection",
+    "BuilderRole",
+    "Prompt",
 ]
