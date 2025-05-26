@@ -1,11 +1,11 @@
 from typing import Optional
-from typing_extensions import override
 
-from autogen_agentchat.messages import TextMessage
 from autogen_agentchat.agents import AssistantAgent
+from autogen_agentchat.messages import TextMessage
 from autogen_core.models import ChatCompletionClient, UserMessage
 from autogen_core.tools import BaseTool
 from pydantic import BaseModel, Field
+from typing_extensions import override
 from weaviate import WeaviateClient
 
 from autogenstudio.services.weaviate_service import WeaviateService
@@ -37,9 +37,13 @@ class ClarificationAgent(AssistantAgent):
             description="Clarification agent that asks clarifying questions to the user.",
             system_message=system_prompt,
             model_client=model_client,
-            model_client_stream=True,
+            model_client_stream=False,
             output_content_type=ClarificationAgentResponse,
             tools=tools,
+            handoffs=[
+                "user_proxy",
+                "PlannerAgent",
+            ],  # it can either ask from user or handoff to planner agent
         )
 
     @override
@@ -56,7 +60,9 @@ class ClarificationAgent(AssistantAgent):
         query = await self._model_client.create(
             [
                 UserMessage(
-                    content=weaviate_query_prompt.format(user_content=message.content),
+                    content=weaviate_query_prompt.format(
+                        user_content=message.to_model_text()
+                    ),
                     type="UserMessage",
                     source=message.source,
                 )
@@ -80,7 +86,7 @@ class ClarificationAgent(AssistantAgent):
 
             messages[-1] = TextMessage(
                 source=messages[-1].source,
-                content=context_message + messages[-1].content,
+                content=context_message + messages[-1].to_model_text(),
                 metadata=messages[-1].metadata,
             )
         print(messages[-1])
@@ -89,7 +95,11 @@ class ClarificationAgent(AssistantAgent):
     @override
     async def on_messages_stream(self, messages, cancellation_token):
         # if kb is not connected
-        if not self.kb_collection or len(messages) < 1:
+        if (
+            not self.kb_collection
+            or len(messages) < 1
+            or messages[-1].source != "user_proxy"
+        ):
             pass
         else:
             # the mose recent user message
@@ -100,7 +110,7 @@ class ClarificationAgent(AssistantAgent):
                 [
                     UserMessage(
                         content=weaviate_query_prompt.format(
-                            user_content=message.content
+                            user_content=message.to_model_text()
                         ),
                         type="UserMessage",
                         source=message.source,
@@ -123,10 +133,12 @@ class ClarificationAgent(AssistantAgent):
                 context_message = f"[Knoledge Base Context]\n{kb_context}\n\n"
                 messages = list(messages)
 
-                messages[-1] = TextMessage(
-                    source=messages[-1].source,
-                    content=context_message + messages[-1].content,
-                    metadata=messages[-1].metadata,
+                messages.append(
+                    TextMessage(
+                        source=messages[-1].source,
+                        content=context_message + messages[-1].to_model_text(),
+                        metadata=messages[-1].metadata,
+                    )
                 )
 
         async for msg in super().on_messages_stream(messages, cancellation_token):
@@ -145,6 +157,7 @@ the response should only have the query string, and nothing else.
 system_prompt = """# Clarification Agent System Prompt
 
 You are a Clarification Agent that identifies ambiguities or missing information in user requests before they're processed by other agents.
+try to infer from the user's response as much as possible
 
 ## Core Functions
 - Analyze all provided context to identify vague terms, ambiguities, or missing details
@@ -175,5 +188,5 @@ You are a Clarification Agent that identifies ambiguities or missing information
 3. If not needed, confirm understanding and prepare for handoff
 4. After clarification, verify completeness and prepare final context
 
-Remember: Your goal is to ensure all inputs are sufficiently clear and detailed to enable optimal performance from subsequent agents in the workflow.
+Remember: Your goal is to ensure all inputs are sufficiently clear and detailed to enable optimal performance from subsequent agents in the workflow, but not annoy the user with continuous questions
 """

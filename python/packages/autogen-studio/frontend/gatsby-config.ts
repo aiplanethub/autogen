@@ -1,17 +1,22 @@
-import type { GatsbyConfig } from "gatsby";
-import fs from "fs";
+import { GatsbyConfig } from "gatsby";
+import path from "path";
+import fs from "fs"
 
 const envFile = `.env.${process.env.NODE_ENV}`;
+const envPath = path.resolve(process.cwd(), envFile);
 
-fs.access(envFile, fs.constants.F_OK, (err) => {
-  if (err) {
-    console.warn(`File '${envFile}' is missing. Using default values.`);
-  }
-});
-
-require("dotenv").config({
-  path: envFile,
-});
+console.log('GATSBY_API_URL:', process.env.GATSBY_API_URL);
+console.log('NODE_ENV:', process.env.NODE_ENV);
+// Check if file exists synchronously
+if (fs.existsSync(envPath)) {
+  require("dotenv").config({
+    path: envPath,
+  });
+} else {
+  console.warn(`File '${envFile}' is missing. Using default values.`);
+  // Fallback to default .env file
+  require("dotenv").config();
+}
 
 const config: GatsbyConfig = {
   pathPrefix: process.env.PREFIX_PATH_VALUE || "",

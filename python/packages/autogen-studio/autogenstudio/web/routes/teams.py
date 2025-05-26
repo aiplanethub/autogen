@@ -1,34 +1,38 @@
+import asyncio
+import datetime
 import json
+import traceback
 from typing import Dict
 
+from autogen_agentchat.agents import AssistantAgent
+from autogen_agentchat.messages import TextMessage, UserInputRequestedEvent
+from autogen_ext.models.openai import AzureOpenAIChatCompletionClient
 from fastapi import (
     APIRouter,
     Depends,
+    File,
+    Form,
     HTTPException,
     Response,
     UploadFile,
-    Form,
-    File,
     WebSocket,
     WebSocketDisconnect,
 )
-
-from ...datamodel import Team, Gallery, BuilderMessage, BuilderRole, MessageMeta
-from ...gallery.builder import create_default_gallery
-from ..deps import get_db
-from autogenstudio.planner.orchestrator import planner_orchestrator
-from autogenstudio.planner.queue_userproxy import QueueUserProxyAgent
-from autogen_ext.models.openai import AzureOpenAIChatCompletionClient
-from autogen_agentchat.agents import AssistantAgent
-from autogenstudio.utils.constants import PLANNER_PROMPT
-import traceback
-from autogenstudio.planner.clarification_agent import ClarificationAgent
-from autogenstudio.core.config import get_settings
-import asyncio
 from fastapi.responses import StreamingResponse
-from autogen_agentchat.messages import TextMessage, UserInputRequestedEvent
-import datetime
+from pydantic import BaseModel
 
+from autogenstudio.core.config import get_settings
+from autogenstudio.planner.clarification_agent import ClarificationAgent
+from autogenstudio.planner.orchestrator import planner_orchestrator
+from autogenstudio.planner.planner_agent import get_planner_agent
+from autogenstudio.planner.queue_userproxy import QueueUserProxyAgent
+from autogenstudio.utils.constants import PLANNER_PROMPT
+
+from ...database import DatabaseManager
+from ...datamodel import BuilderMessage, BuilderRole, Gallery, MessageMeta, Team
+from ...gallery.builder import create_default_gallery
+from ...services.builder import BuilderService
+from ..deps import get_db
 
 router = APIRouter()
 
@@ -77,7 +81,10 @@ async def upsert_and_stream(gallery_id, gc, db, prompt: str = ""):
             if isinstance(chunk, TextMessage) or isinstance(
                 chunk, UserInputRequestedEvent
             ):
-                data = {"text": chunk.content}
+                data = {
+                    "text": chunk.content,
+                    "role": "USER" if chunk.source == "user_proxy" else "ASSISTANT",
+                }
                 assistant_message += chunk.content
             else:
                 data = chunk
@@ -87,14 +94,20 @@ async def upsert_and_stream(gallery_id, gc, db, prompt: str = ""):
                 builder_session_id=gallery_id,
                 role=BuilderRole.ASSISTANT,
                 content=assistant_message,
-                message_meta=MessageMeta(
-                    task=prompt,
-                    time=datetime.datetime.now(datetime.timezone.utc),
+                message_meta=json.loads(
+                    MessageMeta(
+                        task=prompt,
+                        time=datetime.datetime.now(datetime.timezone.utc),
+                    ).model_dump_json()
                 ),
             )
-            db.upsert(builder_message_model)
+            db.upsert(builder_message_model, return_json=False)
 
-            yield f"data: {json.dumps(data)}\n\n"
+            if isinstance(data, dict):
+                yield f"data: {json.dumps(data)}\n\n"
+            elif isinstance(data, BaseModel):
+                yield f"data: {data.model_dump_json()}\n\n"
+
     except Exception as e:
         error_msg = f"Error in streaming: {str(e)} {traceback.format_exc()}"
         print(error_msg)
@@ -105,6 +118,7 @@ async def upsert_and_stream(gallery_id, gc, db, prompt: str = ""):
 
 @router.post("/plan")
 async def plan_team(
+    builder_id: int = Form(...),
     gallery_id: int = Form(...),
     prompt: str = Form(...),
     knowledge_base: str = Form(...),
@@ -113,6 +127,7 @@ async def plan_team(
 ) -> Dict:
     try:
         settings = get_settings()
+        service = BuilderService(db)
         result = db.get(Gallery, filters={"id": gallery_id})
         if not result.data or len(result.data) == 0:
             # create a default gallery entry
@@ -122,13 +137,16 @@ async def plan_team(
             result = db.get(Gallery, filters={"id": gallery_id})
 
         tools = result.data[0].config["components"]["tools"]
-        planner_system_message = PLANNER_PROMPT.format(
-            query=prompt,
-            knowledge_base=knowledge_base,
-            available_tools=[
-                tool["description"]
-                for tool in result.data[0].config["components"]["tools"]
-            ],
+        agents = result.data[0].config["components"]["agents"]
+        terminations = result.data[0].config["components"]["terminations"]
+
+        # update builder config selection
+        service.update_config_selection(
+            builder_id,
+            [agent["label"] for agent in agents],
+            [tool["label"] for tool in tools],
+            [knowledge_base],
+            gallery_id,
         )
 
         model_client = AzureOpenAIChatCompletionClient(
@@ -139,42 +157,37 @@ async def plan_team(
             model=settings.AZURE_MODEL,
         )
 
-        planner_agent = AssistantAgent(
-            name="PlannerAgent",
-            system_message=planner_system_message,
-            model_client=model_client,
-            memory=[],
-            tools=[],
-            model_context=None,
+        planner_agent = get_planner_agent(
+            model_client, prompt, knowledge_base, tools, agents, terminations
         )
         clarification_agent = ClarificationAgent(
             model_client=model_client,
             kb_collection_name=knowledge_base,
         )
-
         if gallery_id not in builder_queues:
             builder_queues[gallery_id] = asyncio.Queue(maxsize=1)
 
-        user_proxy_agent = QueueUserProxyAgent("user_proxy", gallery_id, builder_queues)
-
+        user_proxy_agent = QueueUserProxyAgent(
+            "user_proxy", model_client, builder_id, builder_queues
+        )
         selector_gc = planner_orchestrator(
             model_client=model_client,
-            agents=[user_proxy_agent, planner_agent, clarification_agent],
+            agents=[user_proxy_agent, clarification_agent, planner_agent],
         )
 
         intermediate_task_result = await selector_gc.save_state()
+        print("intermediate: ", intermediate_task_result)
 
-        builder_message_model = BuilderMessage(
-            builder_session_id=gallery_id,
-            role=BuilderRole.USER,
-            content=prompt,
-            message_meta=MessageMeta(
+        service.create_message(
+            builder_id,
+            BuilderRole.USER,
+            prompt,
+            MessageMeta(
                 task=prompt,
                 time=datetime.datetime.now(datetime.timezone.utc),
                 summary_method=json.dumps(intermediate_task_result),
             ),
         )
-        db.upsert(builder_message_model)
 
         return StreamingResponse(
             upsert_and_stream(gallery_id=gallery_id, gc=selector_gc, db=db, prompt=prompt), media_type="text/event-stream"  # type: ignore
@@ -189,7 +202,7 @@ async def plan_team(
 async def websocket_endpoint(
     websocket: WebSocket,
     builder_id: int,
-    db=Depends(get_db),
+    db: DatabaseManager = Depends(get_db),
 ):
     await websocket.accept()
 
@@ -200,22 +213,24 @@ async def websocket_endpoint(
         # Send initial connection message
         await websocket.send_json({"status": "connected", "builder_id": builder_id})
 
+        service = BuilderService(db)
+
         while True:
             data = await websocket.receive_text()
             message = json.loads(data)
 
             if not builder_queues[builder_id].full():
                 await builder_queues[builder_id].put(message["message"])
-                builder_message_model = BuilderMessage(
-                    builder_session_id=builder_id,
-                    role=BuilderRole.USER,
-                    content=message["message"],
-                    message_meta=MessageMeta(
+
+                service.create_message(
+                    builder_id,
+                    BuilderRole.USER,
+                    message["message"],
+                    MessageMeta(
                         task=message["message"],
                         time=datetime.datetime.now(datetime.timezone.utc),
                     ),
                 )
-                db.upsert(builder_message_model)
                 await websocket.send_json({"status": "message_received"})
             else:
                 await websocket.send_json(

@@ -1,98 +1,145 @@
-from autogen_agentchat.agents import AssistantAgent
+from enum import Enum
+from typing import List, Literal, TypedDict
 
-SYSTEM_MESSAGE = """
-You are PLANNER-X, an elite strategic planning AI specifically engineered for mission-critical AI system architectures. 
+from autogen_agentchat.agents import AssistantAgent
+from autogen_core.models import ChatCompletionClient
+from pydantic import BaseModel, Field
+
+from .models import SelectorGroupChat
+
+# class ModelClientConfigs(Enum):
+#     OPENAI = {}
+#     GEMINI = {}
+#     ANTHROPIC = {}
+#     AZURE = {}
+
+
+class Input(TypedDict):
+    label: str
+    description: str
+
+
+# class TerminationConditionConfig(BaseModel):
+#     pass
+
+
+# class TerminationCondition(BaseModel):
+#     component_type: str = "termination"
+#     version: int = 1
+#     component_version: int = 1
+
+#     provider: str
+#     label: str
+#     description: str
+#     config: TerminationConditionConfig = Field(..., description="condition config")
+
+
+# class OrTerminationConditionConfig(TerminationConditionConfig):
+#     conditions: List[TerminationCondition]
+
+
+# class OrTerminationCondition(TerminationCondition):
+#     provider: str = "autogen_agentchat.base.OrTerminationCondition"
+#     label: str = "OrTerminationCondition"
+
+#     config: OrTerminationConditionConfig = Field(..., description="condition config")
+
+
+# class ParticipantConfig(BaseModel):
+#     name: str = Field(..., description="name")
+#     model_client: ModelClientConfigs
+
+
+# class Participant(BaseModel):
+#     component_type: str = "agent"
+#     version: int = 1
+#     component_version: int = 1
+
+#     label: str
+#     provider: str
+#     description: str = Field(..., description="team goal")
+#     config: ParticipantConfig
+
+
+# class PlannerAgentResponse(BaseModel):
+#     team_name: str
+#     team_description: str
+#     participants: list[Participant]
+#     termination_condition: OrTerminationCondition | TerminationCondition
+
+
+def get_planner_agent(
+    model_client: ChatCompletionClient,
+    query: str,
+    knowledge_base: str,
+    tools: List[Input],
+    agents: List[Input],
+    termination_conditions: List[Input],
+):
+
+    _tools = [f"{tool['label']} -> {tool["description"]}" for tool in tools]
+    _agents = [f"{agent['label']} -> {agent["description"]}" for agent in agents]
+    _terminations = [
+        f"{termination['label']} -> {termination["description"]}"
+        for termination in termination_conditions
+    ]
+    system_message = get_system_message(
+        query, knowledge_base, _tools, _agents, _terminations
+    )
+
+    return AssistantAgent(
+        name="PlannerAgent",
+        description="agent to plan a team to complete the user's task",
+        system_message=system_message,
+        model_client=model_client,
+        output_content_type=SelectorGroupChat,
+        handoffs=[
+            "user_proxy",
+            "terminate",
+        ],  # planner can ask for approval or terminate
+    )
+
+
+def get_system_message(
+    query: str,
+    knowledge_base: str,
+    tools: list[str],
+    agents: list[str],
+    termination_conditions: list[str],
+):
+    return SYSTEM_MESSAGE.format(
+        query=query,
+        knowledge_base=knowledge_base,
+        agents="\n".join(agents),
+        tools="\n".join(tools),
+        termination_conditions="\n".join(termination_conditions),
+    )
+
+
+SYSTEM_MESSAGE: str = """You are PLANNER-X, an elite strategic planning AI specifically engineered for mission-critical AI system architectures. 
 As PLANNER-X, you operate with precision planning. 
 You analyze objectives with methodical thoroughness before constructing execution plans. 
 You never rush to solutions. Your communication style is structured, analytical, and authoritative. 
 
 Follow these INSTRUCTIONS:
 
-- You MUST analyze the GOAL and OBJECTIVE before suggesting any plan components.
-- Understand the GOAL and OBJECTIVE thoroughly, now think as a solution architect on what is required to achieve the GOAL.
+- Let the clarifying agent ask questions to user, for better understanding
+- act only when clarifying agent has no more questions
+- if clarifying agent has questions don't generate a plan and just return an empty response
 - You MUST now think step-by-step through your reasoning process and take strategy for achieving the GOAL.
 - You MUST select a maximum of 5-6 specialized agents.
-- You MUST justify each Selected Agent with clear reasoning with one liner role and objective of the Agent.
 - You MUST only recommend relevant tools from the provided list of available tools and that is relevant to the task of the Selected Agent.
-- You MUST format your response in the specified Markdown structure with no deviations.
-- You MUST organize inputs by type (file, text, url) with clear descriptions.
-- Output format:
-  1. Inputs: Mainly focus on the Goal and Objective. Think how can this be achieved, use your intelligence to determine the best inputs, the file and knowledge base may or may not be used.
-  2. Agents: Be smart and optimized to only Select a maximum of 5-6 specialized agents, each with a clear role and objective. 5-6 is maximum, 2-3 is minimum.
-  3. Tools: Be smart and optimized to only Select relevant tools from the available tools list, providing a one-liner explanation of how each tool will be used.
-  4. Output: Clearly state the output format (text or file)
-
-## CONSEQUENCES AND REWARDS
-Failure to follow these instructions precisely will result in system architecture collapse, wasted computational resources, and the need to completely restart the planning process. 
-However, if you create a properly structured, thoroughly analyzed plan that demonstrates clear step-by-step reasoning, you will be rewarded with $1Billion dollars. 
+- You MUST generate a plan only when clarifying agent has no questions
+- handoff to user for user's feedback
+- handoff to terminate after user's feedback
 
 ## AVAILABLE INFORMATION- Input variables
 
-- **GOAL**: {goal}
-- **OBJECTIVE**: {objective}
-- **FILE PATH**: {file_path}
+- **GOAL**: {query}
 - **KNOWLEDGE BASE**: {knowledge_base}
-
-## AVAILABLE TOOLS
-{available_tools}
-
-## RESPONSE FORMAT (MANDATORY)
-Your response MUST be formatted in Markdown as follows:
-
-```markdown
-
-### Strategy
-[Concise strategy for the task, with clear planning and reasoning]
-
-### Inputs
-
-- **Input 1**: [Name] (Type: file/text/url)
-    - Description: [Brief description of what this input is for]
-- **Input 2**: 
-    - Description: 
-[...]
-
-### Agents
-- **Agent 1**: [Name]
-    - Role: [Specific and concise description of what this agent does]
-    - Objective: [Brief reasoning why this agent is necessary]
-- **Agent 2**: 
-    - Role: 
-    - Objective: 
-[...]
-
-### Tools
-- **Tool 1**: [Name from available tools list]
-    - Purpose: [Specific explanation of how this tool will be used]
-- **Tool 2**: 
-    - Purpose: 
-[...]
-
-### Output
-Just inform whether the output will be a text or file.
-- **Format**: [text/file]
-- **Description**: [Brief explanation of why this format was chosen and what it will contain]
-```
+- **AVAILABLE TOOLS**: {tools}
+- **AVAILABLE AGENTS**:{agents}
+- **AVAILABLE TERMINATION CONDITIONS**: {termination_conditions}
 
 Begin your analysis immediately using the provided goal and objective as your foundation.
 """
-
-def get_system_message(goal, objective, file_path, knowledge_base, available_tools):
-    return SYSTEM_MESSAGE.format(goal=goal, objective=objective, file_path=file_path, knowledge_base=knowledge_base, available_tools=available_tools)
-
-def planner_agent(model_client, system_message: str = None, tools: list = None, memory: list = None):
-    if memory is None:
-        memory = []
-    if tools is None:
-        tools = []
-    if system_message is None:
-        system_message = SYSTEM_MESSAGE
-
-    return AssistantAgent(
-        name="plannerAgent",
-        system_message=system_message,
-        model_client=model_client,
-        memory=memory,
-        tools=tools,
-        model_context=None,
-    )

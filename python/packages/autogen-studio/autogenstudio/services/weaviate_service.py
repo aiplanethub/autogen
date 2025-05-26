@@ -9,7 +9,7 @@ from uuid import UUID
 from openai import AsyncAzureOpenAI
 import weaviate
 from fastapi import HTTPException, status
-from weaviate.classes.config import Configure
+from weaviate.classes.config import Property, DataType, Configure
 from weaviate.classes.init import Auth
 
 from autogenstudio.core.config import get_settings
@@ -72,6 +72,9 @@ class WeaviateService:
         else:
             collection = self.client.collections.create(
                 collection_name,
+                properties=[
+                    Property(name="content", data_type=DataType.TEXT)
+                ],
                 generative_config=Configure.Generative.azure_openai(
                     resource_name=self.settings.AZURE_MODEL,
                     deployment_id=self.settings.AZURE_DEPLOYMENT,
@@ -113,7 +116,7 @@ class WeaviateService:
             query_embedding = await self.__generate_embedding(query)
             collection = self.__get_collection(collection_name)
             response = collection.query.hybrid(
-                query=query, alpha=0.5, vector=query_embedding
+                query=query, alpha=0.5, vector=query_embedding, return_properties=["content"]
             )
 
             result = [o.properties.get("content") for o in response.objects]

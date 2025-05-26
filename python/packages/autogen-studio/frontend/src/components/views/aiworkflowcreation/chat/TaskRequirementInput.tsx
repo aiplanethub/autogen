@@ -15,19 +15,34 @@ import { appContext } from "../../../../hooks/provider";
 import { galleryAPI } from "../../gallery/api";
 import PromptModal from "../options/prompts/PromptModal";
 import { cn } from "../../../utils/utils";
+import { chatAPI } from "./api";
 
-const TaskRequirementInput: React.FC<{ hasConversations: boolean }> = ({
+type Props = {
+  hasConversations: boolean;
+  taskRequirement: string;
+  setTaskRequirement: React.Dispatch<React.SetStateAction<string>>;
+  builder_id: number;
+  build_agent_callback: () => void
+};
+
+const TaskRequirementInput: React.FC<Props> = ({
   hasConversations,
+  taskRequirement,
+  setTaskRequirement,
+  builder_id,
+  build_agent_callback
 }) => {
   const [messageApi, contextHolder] = message.useMessage();
   const [isLoading, setIsLoading] = useState(false);
   const [galleries, setGalleries] = useState<IGalleryProps[]>([]);
-  const [taskRequirement, setTaskRequirement] = useState("");
   const [modalScreen, setModalScreen] = useState<ModalScreens>("gallery");
   const [isOpen, setIsOpen] = useState(false);
   const [selectedGallery, setSelectedGallery] = useState<IGalleryProps | null>(
     null
   );
+  const [websocket, setWebSocket] = useState<WebSocket | null>(null)
+  const [textAreaDisabled, setTextAreaDisabled] = useState(false)
+
   const [selectedPrompt, setSelectedPrompt] = useState<IPrompt | null>(null);
   const { user } = useContext(appContext);
   const fetchGalleries = useCallback(async () => {
@@ -57,6 +72,24 @@ const TaskRequirementInput: React.FC<{ hasConversations: boolean }> = ({
       setIsLoading(false);
     }
   }, [user?.id, messageApi]);
+
+  useEffect(() => {
+    if (websocket) {
+      return
+    }
+
+    const ws = chatAPI.setupWebsocketConnection(builder_id, (event) => {
+      console.log(event)
+    })
+
+    setWebSocket(ws)
+
+    return () => {
+      ws.close()
+    }
+
+
+  }, [websocket])
 
   useEffect(() => {
     fetchGalleries();
@@ -134,6 +167,7 @@ const TaskRequirementInput: React.FC<{ hasConversations: boolean }> = ({
         )}
       >
         <Textarea
+          disabled={textAreaDisabled}
           className="w-full p-3 focus:ring-0 focus:outline-none text-base bg-transparent font-normal placeholder:text-gray-400 mb-3"
           placeholder="Type a prompt to complete a task"
           rows={hasConversations ? 1 : 3}
@@ -144,7 +178,7 @@ const TaskRequirementInput: React.FC<{ hasConversations: boolean }> = ({
         <div className="flex items-center justify-between">
           <div className="flex space-x-2">
             <Button
-              onClick={() => {}}
+              onClick={() => { }}
               className="w-8 h-8 rounded-full hover:bg-secondary transition-colors border border-secondary flex justify-center items-center"
             >
               <Icon name="paperclip" className="h-4 w-4" />
@@ -176,6 +210,7 @@ const TaskRequirementInput: React.FC<{ hasConversations: boolean }> = ({
           </div>
 
           <Button
+            onClick={build_agent_callback}
             className={cn(
               "bg-[#115E59] hover:bg-green-800 text-white py-2 px-4 rounded-lg flex items-center transition-colors font-medium text-sm",
               hasConversations && "px-2"

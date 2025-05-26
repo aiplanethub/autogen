@@ -138,6 +138,8 @@ const AIWorkflowCreationManager = () => {
     }
   };
 
+  console.log(currentSession)
+
   return (
     <div className="relative flex h-full w-full">
       {contextHolder}
@@ -149,9 +151,8 @@ const AIWorkflowCreationManager = () => {
         <>
           {/* Sidebar */}
           <div
-            className={`absolute left-0 top-0 h-full transition-all duration-200 ease-in-out ${
-              isSidebarOpen ? "w-64" : "w-12"
-            }`}
+            className={`absolute left-0 top-0 h-full transition-all duration-200 ease-in-out ${isSidebarOpen ? "w-64" : "w-12"
+              }`}
           >
             <AIWorkflowCreationSidebar
               isOpen={isSidebarOpen}
@@ -165,9 +166,8 @@ const AIWorkflowCreationManager = () => {
           </div>
           {/* Main Content */}
           <div
-            className={`flex-1 transition-all -mr-6 duration-200 ${
-              isSidebarOpen ? "ml-64" : "ml-12"
-            }`}
+            className={`flex-1 transition-all -mr-6 duration-200 ${isSidebarOpen ? "ml-64" : "ml-12"
+              }`}
           >
             <div className="px-4 py-2 w-full h-full">
               {/* Breadcrumb */}
@@ -191,8 +191,8 @@ const AIWorkflowCreationManager = () => {
                 <div className="flex items-center justify-center h-[calc(100vh-120px)] text-secondary">
                   Select a session from the sidebar or create a new one
                 </div>
-              ) : (
-                <Assistant />
+              ) : (currentSession !== null &&
+                <Assistant builder_id={parseInt(currentSession.id)} gallery_id={currentSession.config.gallery_id} />
               )}
             </div>
           </div>
