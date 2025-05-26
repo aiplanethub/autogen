@@ -275,6 +275,7 @@ base_system_message_transformers: List[Callable[[LLMMessage, Dict[str, Any]], Di
 
 base_user_transformer_funcs: List[Callable[[LLMMessage, Dict[str, Any]], Dict[str, Any]]] = [
     _assert_valid_name,
+    _set_name,
     _set_role("user"),
 ]
 
@@ -292,7 +293,6 @@ system_message_transformers: List[Callable[[LLMMessage, Dict[str, Any]], Dict[st
 single_user_transformer_funcs: List[Callable[[LLMMessage, Dict[str, Any]], Dict[str, Any]]] = (
     base_user_transformer_funcs
     + [
-        _set_name,
         _set_prepend_text_content,
     ]
 )
@@ -300,7 +300,6 @@ single_user_transformer_funcs: List[Callable[[LLMMessage, Dict[str, Any]], Dict[
 multimodal_user_transformer_funcs: List[Callable[[LLMMessage, Dict[str, Any]], Dict[str, Any]]] = (
     base_user_transformer_funcs
     + [
-        _set_name,
         _set_multimodal_content,
     ]
 )
@@ -335,19 +334,6 @@ thought_assistant_transformer_funcs_gemini: List[Callable[[LLMMessage, Dict[str,
 
 
 # === Specific message param functions ===
-single_user_transformer_funcs_mistral: List[Callable[[LLMMessage, Dict[str, Any]], Dict[str, Any]]] = (
-    base_user_transformer_funcs
-    + [
-        _set_prepend_text_content,
-    ]
-)
-
-multimodal_user_transformer_funcs_mistral: List[Callable[[LLMMessage, Dict[str, Any]], Dict[str, Any]]] = (
-    base_user_transformer_funcs
-    + [
-        _set_multimodal_content,
-    ]
-)
 
 
 # === Transformer maps ===
@@ -373,8 +359,6 @@ assistant_transformer_funcs: Dict[str, List[Callable[[LLMMessage, Dict[str, Any]
     "tools": tools_assistant_transformer_funcs,
     "thought": thought_assistant_transformer_funcs,
 }
-
-
 assistant_transformer_constructors: Dict[str, Callable[..., Any]] = {
     "text": ChatCompletionAssistantMessageParam,
     "tools": ChatCompletionAssistantMessageParam,
@@ -395,7 +379,7 @@ def assistant_condition(message: LLMMessage, context: Dict[str, Any]) -> str:
 
 user_transformer_funcs_gemini: Dict[str, List[Callable[[LLMMessage, Dict[str, Any]], Dict[str, Any]]]] = {
     "text": single_user_transformer_funcs + [_set_empty_to_whitespace],
-    "multimodal": multimodal_user_transformer_funcs,
+    "multimodal": multimodal_user_transformer_funcs + [_set_empty_to_whitespace],
 }
 
 
@@ -416,12 +400,6 @@ assistant_transformer_funcs_claude: Dict[str, List[Callable[[LLMMessage, Dict[st
     "text": single_assistant_transformer_funcs + [_set_pass_message_when_whitespace],
     "tools": tools_assistant_transformer_funcs,  # that case, message.content is a list of FunctionCall
     "thought": thought_assistant_transformer_funcs_gemini,  # that case, message.content is a list of FunctionCall
-}
-
-
-user_transformer_funcs_mistral: Dict[str, List[Callable[[LLMMessage, Dict[str, Any]], Dict[str, Any]]]] = {
-    "text": single_user_transformer_funcs_mistral,
-    "multimodal": multimodal_user_transformer_funcs_mistral,
 }
 
 
@@ -488,24 +466,6 @@ __CLAUDE_TRANSFORMER_MAP: TransformerMap = {
     FunctionExecutionResultMessage: function_execution_result_message,
 }
 
-__MISTRAL_TRANSFORMER_MAP: TransformerMap = {
-    SystemMessage: build_transformer_func(
-        funcs=system_message_transformers + [_set_empty_to_whitespace],
-        message_param_func=ChatCompletionSystemMessageParam,
-    ),
-    UserMessage: build_conditional_transformer_func(
-        funcs_map=user_transformer_funcs_mistral,
-        message_param_func_map=user_transformer_constructors,
-        condition_func=user_condition,
-    ),
-    AssistantMessage: build_conditional_transformer_func(
-        funcs_map=assistant_transformer_funcs,
-        message_param_func_map=assistant_transformer_constructors,
-        condition_func=assistant_condition,
-    ),
-    FunctionExecutionResultMessage: function_execution_result_message,
-}
-
 
 # set openai models to use the transformer map
 total_models = get_args(ModelFamily.ANY)
@@ -515,16 +475,7 @@ __claude_models = [model for model in total_models if ModelFamily.is_claude(mode
 
 __gemini_models = [model for model in total_models if ModelFamily.is_gemini(model)]
 
-__llama_models = [model for model in total_models if ModelFamily.is_llama(model)]
-
-__unknown_models = list(
-    set(total_models) - set(__openai_models) - set(__claude_models) - set(__gemini_models) - set(__llama_models)
-)
-__mistral_models = [model for model in total_models if ModelFamily.is_mistral(model)]
-
-__unknown_models = list(
-    set(total_models) - set(__openai_models) - set(__claude_models) - set(__gemini_models) - set(__mistral_models)
-)
+__unknown_models = list(set(total_models) - set(__openai_models) - set(__claude_models) - set(__gemini_models))
 
 for model in __openai_models:
     register_transformer("openai", model, __BASE_TRANSFORMER_MAP)
@@ -534,12 +485,6 @@ for model in __claude_models:
 
 for model in __gemini_models:
     register_transformer("openai", model, __GEMINI_TRANSFORMER_MAP)
-
-for model in __llama_models:
-    register_transformer("openai", model, __BASE_TRANSFORMER_MAP)
-
-for model in __mistral_models:
-    register_transformer("openai", model, __MISTRAL_TRANSFORMER_MAP)
 
 for model in __unknown_models:
     register_transformer("openai", model, __BASE_TRANSFORMER_MAP)

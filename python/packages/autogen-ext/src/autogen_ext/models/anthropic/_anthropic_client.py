@@ -5,6 +5,8 @@ import json
 import logging
 import re
 import warnings
+
+# from asyncio import Task
 from typing import (
     Any,
     AsyncGenerator,
@@ -23,7 +25,7 @@ from typing import (
 )
 
 import tiktoken
-from anthropic import AsyncAnthropic, AsyncAnthropicBedrock, AsyncStream
+from anthropic import AnthropicBedrock, AsyncAnthropic, AsyncStream
 from anthropic.types import (
     Base64ImageSourceParam,
     ContentBlock,
@@ -1119,7 +1121,7 @@ class AnthropicBedrockChatCompletionClient(
     BaseAnthropicChatCompletionClient, Component[AnthropicBedrockClientConfigurationConfigModel]
 ):
     """
-    Chat completion client for Anthropic's Claude models on AWS Bedrock.
+    Chat completion client for Anthropic's Claude models.
 
     Args:
         model (str): The Claude model to use (e.g., "claude-3-sonnet-20240229", "claude-3-opus-20240229")
@@ -1143,24 +1145,28 @@ class AnthropicBedrockChatCompletionClient(
     .. code-block:: python
 
         import asyncio
-        from autogen_ext.models.anthropic import AnthropicBedrockChatCompletionClient, BedrockInfo
-        from autogen_core.models import UserMessage, ModelInfo
+        from autogen_ext.models.anthropic import AnthropicBedrockChatCompletionClient
+        from autogen_core.models import UserMessage
 
 
         async def main():
-            anthropic_client = AnthropicBedrockChatCompletionClient(
-                model="anthropic.claude-3-5-sonnet-20240620-v1:0",
-                temperature=0.1,
-                model_info=ModelInfo(
-                    vision=False, function_calling=True, json_output=False, family="unknown", structured_output=True
-                ),
-                bedrock_info=BedrockInfo(
-                    aws_access_key="<aws_access_key>",
-                    aws_secret_key="<aws_secret_key>",
-                    aws_session_token="<aws_session_token>",
-                    aws_region="<aws_region>",
-                ),
-            )
+            config = {
+                "model": "anthropic.claude-3-5-sonnet-20240620-v1:0",
+                "temperature": 0.1,
+                "model_info": {
+                    "vision": True,
+                    "function_calling": True,
+                    "json_output": True,
+                    "family": ModelFamily.CLAUDE_3_5_SONNET,
+                },
+                "bedrock_info": {
+                    "aws_access_key": "<aws_access_key>",
+                    "aws_secret_key": "<aws_secret_key>",
+                    "aws_session_token": "<aws_session_token>",
+                    "aws_region": "<aws_region>",
+                },
+            }
+            anthropic_client = AnthropicBedrockChatCompletionClient(**config)
 
             result = await anthropic_client.create([UserMessage(content="What is the capital of France?", source="user")])  # type: ignore
             print(result)
@@ -1172,11 +1178,11 @@ class AnthropicBedrockChatCompletionClient(
 
     component_type = "model"
     component_config_schema = AnthropicBedrockClientConfigurationConfigModel
-    component_provider_override = "autogen_ext.models.anthropic.AnthropicBedrockChatCompletionClient"
+    component_provider_override = "autogen_ext.models.anthropic.AnthropicChatCompletionClient"
 
     def __init__(self, **kwargs: Unpack[AnthropicBedrockClientConfiguration]):
         if "model" not in kwargs:
-            raise ValueError("model is required for  AnthropicBedrockChatCompletionClient")
+            raise ValueError("model is required for AnthropicChatCompletionClient")
 
         self._raw_config: Dict[str, Any] = dict(kwargs).copy()
         copied_args = dict(kwargs).copy()
@@ -1193,17 +1199,13 @@ class AnthropicBedrockChatCompletionClient(
         if bedrock_info is None:
             raise ValueError("bedrock_info is required for AnthropicBedrockChatCompletionClient")
 
-        # Handle bedrock_info
+        # Handle bedrock_info as secretestr
         aws_region = bedrock_info["aws_region"]
-        aws_access_key: Optional[str] = None
-        aws_secret_key: Optional[str] = None
-        aws_session_token: Optional[str] = None
-        if all(key in bedrock_info for key in ("aws_access_key", "aws_secret_key", "aws_session_token")):
-            aws_access_key = bedrock_info["aws_access_key"]
-            aws_secret_key = bedrock_info["aws_secret_key"]
-            aws_session_token = bedrock_info["aws_session_token"]
+        aws_access_key = bedrock_info["aws_access_key"].get_secret_value()
+        aws_secret_key = bedrock_info["aws_secret_key"].get_secret_value()
+        aws_session_token = bedrock_info["aws_session_token"].get_secret_value()
 
-        client = AsyncAnthropicBedrock(
+        client = AnthropicBedrock(
             aws_access_key=aws_access_key,
             aws_secret_key=aws_secret_key,
             aws_session_token=aws_session_token,

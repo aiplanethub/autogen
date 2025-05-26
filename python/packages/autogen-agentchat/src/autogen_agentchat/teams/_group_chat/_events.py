@@ -48,9 +48,6 @@ class GroupChatAgentResponse(BaseModel):
     agent_response: Response
     """The response from an agent."""
 
-    agent_name: str
-    """The name of the agent that produced the response."""
-
 
 class GroupChatRequestPublish(BaseModel):
     """A request to publish a message to a group chat."""

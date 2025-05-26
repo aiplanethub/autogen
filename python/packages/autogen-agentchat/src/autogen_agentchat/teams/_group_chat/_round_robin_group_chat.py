@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, Callable, List, Mapping, Sequence
+from typing import Any, Callable, List, Mapping
 
 from autogen_core import AgentRuntime, Component, ComponentModel
 from pydantic import BaseModel
@@ -69,13 +69,8 @@ class RoundRobinGroupChatManager(BaseGroupChatManager):
         self._current_turn = round_robin_state.current_turn
         self._next_speaker_index = round_robin_state.next_speaker_index
 
-    async def select_speaker(self, thread: Sequence[BaseAgentEvent | BaseChatMessage]) -> List[str] | str:
-        """Select a speaker from the participants in a round-robin fashion.
-
-        .. note::
-
-            This method always returns a single speaker.
-        """
+    async def select_speaker(self, thread: List[BaseAgentEvent | BaseChatMessage]) -> str:
+        """Select a speaker from the participants in a round-robin fashion."""
         current_speaker_index = self._next_speaker_index
         self._next_speaker_index = (current_speaker_index + 1) % len(self._participant_names)
         current_speaker = self._participant_names[current_speaker_index]

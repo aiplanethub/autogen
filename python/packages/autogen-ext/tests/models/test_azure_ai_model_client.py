@@ -3,7 +3,7 @@ import logging
 import os
 from datetime import datetime
 from typing import Any, AsyncGenerator, List, Type, Union
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 from autogen_core import CancellationToken, FunctionCall, Image
@@ -570,7 +570,7 @@ def thought_with_tool_call_stream_client(monkeypatch: pytest.MonkeyPatch) -> Azu
         )
 
     mock_client = MagicMock()
-    mock_client.close = AsyncMock()
+    mock_client.close = MagicMock()
 
     async def mock_complete(*args: Any, **kwargs: Any) -> Any:
         if kwargs.get("stream", False):

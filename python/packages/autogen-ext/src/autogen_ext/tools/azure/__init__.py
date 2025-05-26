@@ -4,7 +4,6 @@ from ._ai_search import (
     SearchQuery,
     SearchResult,
     SearchResults,
-    VectorizableTextQuery,
 )
 from ._config import AzureAISearchConfig
 
@@ -15,5 +14,4 @@ __all__ = [
     "SearchResult",
     "SearchResults",
     "AzureAISearchConfig",
-    "VectorizableTextQuery",
 ]

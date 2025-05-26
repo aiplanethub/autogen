@@ -33,7 +33,7 @@ class FileLogHandler(logging.Handler):
             record.msg = json.dumps(
                 {
                     "timestamp": ts,
-                    "message": record.msg.model_dump_json(indent=2),
+                    "message": record.msg.model_dump(),
                     "type": record.msg.__class__.__name__,
                 },
             )

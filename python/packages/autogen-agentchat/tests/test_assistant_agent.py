@@ -32,7 +32,7 @@ from autogen_core.models import (
     SystemMessage,
     UserMessage,
 )
-from autogen_core.models._model_client import ModelFamily, ModelInfo
+from autogen_core.models._model_client import ModelFamily
 from autogen_core.tools import BaseTool, FunctionTool, StaticWorkbench
 from autogen_ext.models.openai import OpenAIChatCompletionClient
 from autogen_ext.models.replay import ReplayChatCompletionClient
@@ -41,7 +41,7 @@ from autogen_ext.tools.mcp import (
     SseServerParams,
 )
 from pydantic import BaseModel, ValidationError
-from utils import FileLogHandler, compare_messages, compare_task_results
+from utils import FileLogHandler
 
 logger = logging.getLogger(EVENT_LOGGER_NAME)
 logger.setLevel(logging.DEBUG)
@@ -56,66 +56,8 @@ async def _fail_function(input: str) -> str:
     return "fail"
 
 
-async def _throw_function(input: str) -> str:
-    raise ValueError("Helpful debugging information what went wrong.")
-
-
 async def _echo_function(input: str) -> str:
     return input
-
-
-@pytest.fixture
-def model_info_all_capabilities() -> ModelInfo:
-    return {
-        "function_calling": True,
-        "vision": True,
-        "json_output": True,
-        "family": ModelFamily.GPT_4O,
-        "structured_output": True,
-    }
-
-
-@pytest.mark.asyncio
-async def test_run_with_tool_call_summary_format_function(model_info_all_capabilities: ModelInfo) -> None:
-    model_client = ReplayChatCompletionClient(
-        [
-            CreateResult(
-                finish_reason="function_calls",
-                content=[
-                    FunctionCall(id="1", arguments=json.dumps({"input": "task"}), name="_pass_function"),
-                    FunctionCall(id="2", arguments=json.dumps({"input": "task"}), name="_throw_function"),
-                ],
-                usage=RequestUsage(prompt_tokens=10, completion_tokens=5),
-                thought="Calling pass and fail function",
-                cached=False,
-            ),
-        ],
-        model_info=model_info_all_capabilities,
-    )
-
-    def conditional_string_templates(function_call: FunctionCall, function_call_result: FunctionExecutionResult) -> str:
-        if not function_call_result.is_error:
-            return "SUCCESS: {tool_name} with {arguments}"
-
-        else:
-            return "FAILURE: {result}"
-
-    agent = AssistantAgent(
-        "tool_use_agent",
-        model_client=model_client,
-        tools=[_pass_function, _throw_function],
-        tool_call_summary_formatter=conditional_string_templates,
-    )
-    result = await agent.run(task="task")
-
-    first_tool_call_summary = next((x for x in result.messages if isinstance(x, ToolCallSummaryMessage)), None)
-    if first_tool_call_summary is None:
-        raise AssertionError("Expected a ToolCallSummaryMessage but found none")
-
-    assert (
-        first_tool_call_summary.content
-        == 'SUCCESS: _pass_function with {"input": "task"}\nFAILURE: Helpful debugging information what went wrong.'
-    )
 
 
 @pytest.mark.asyncio
@@ -180,9 +122,9 @@ async def test_run_with_tools(monkeypatch: pytest.MonkeyPatch) -> None:
     index = 0
     async for message in agent.run_stream(task="task"):
         if isinstance(message, TaskResult):
-            assert compare_task_results(message, result)
+            assert message == result
         else:
-            assert compare_messages(message, result.messages[index])
+            assert message == result.messages[index]
             index += 1
 
     # Test state saving and loading.
@@ -273,9 +215,9 @@ async def test_run_with_tools_and_reflection() -> None:
     index = 0
     async for message in agent.run_stream(task="task"):
         if isinstance(message, TaskResult):
-            assert compare_task_results(message, result)
+            assert message == result
         else:
-            assert compare_messages(message, result.messages[index])
+            assert message == result.messages[index]
         index += 1
 
     # Test state saving and loading.
@@ -363,9 +305,9 @@ async def test_run_with_parallel_tools() -> None:
     index = 0
     async for message in agent.run_stream(task="task"):
         if isinstance(message, TaskResult):
-            assert compare_task_results(message, result)
+            assert message == result
         else:
-            assert compare_messages(message, result.messages[index])
+            assert message == result.messages[index]
             index += 1
 
     # Test state saving and loading.
@@ -446,9 +388,9 @@ async def test_run_with_parallel_tools_with_empty_call_ids() -> None:
     index = 0
     async for message in agent.run_stream(task="task"):
         if isinstance(message, TaskResult):
-            assert compare_task_results(message, result)
+            assert message == result
         else:
-            assert compare_messages(message, result.messages[index])
+            assert message == result.messages[index]
             index += 1
 
     # Test state saving and loading.
@@ -560,9 +502,9 @@ async def test_run_with_workbench() -> None:
     index = 0
     async for message in agent.run_stream(task="task"):
         if isinstance(message, TaskResult):
-            assert compare_task_results(message, result)
+            assert message == result
         else:
-            assert compare_messages(message, result.messages[index])
+            assert message == result.messages[index]
         index += 1
 
     # Test state saving and loading.
@@ -779,9 +721,9 @@ async def test_handoffs() -> None:
     index = 0
     async for message in tool_use_agent.run_stream(task="task"):
         if isinstance(message, TaskResult):
-            assert compare_task_results(message, result)
+            assert message == result
         else:
-            assert compare_messages(message, result.messages[index])
+            assert message == result.messages[index]
         index += 1
 
 
@@ -852,9 +794,9 @@ async def test_handoff_with_tool_call_context() -> None:
     index = 0
     async for message in tool_use_agent.run_stream(task="task"):
         if isinstance(message, TaskResult):
-            assert compare_task_results(message, result)
+            assert message == result
         else:
-            assert compare_messages(message, result.messages[index])
+            assert message == result.messages[index]
         index += 1
 
 
@@ -927,9 +869,9 @@ async def test_custom_handoffs() -> None:
     index = 0
     async for message in tool_use_agent.run_stream(task="task"):
         if isinstance(message, TaskResult):
-            assert compare_task_results(message, result)
+            assert message == result
         else:
-            assert compare_messages(message, result.messages[index])
+            assert message == result.messages[index]
         index += 1
 
 
@@ -1004,9 +946,9 @@ async def test_custom_object_handoffs() -> None:
     index = 0
     async for message in tool_use_agent.run_stream(task="task"):
         if isinstance(message, TaskResult):
-            assert compare_task_results(message, result)
+            assert message == result
         else:
-            assert compare_messages(message, result.messages[index])
+            assert message == result.messages[index]
         index += 1
 
 
@@ -1161,9 +1103,9 @@ async def test_list_chat_messages(monkeypatch: pytest.MonkeyPatch) -> None:
     index = 0
     async for message in agent.run_stream(task=messages):
         if isinstance(message, TaskResult):
-            assert compare_task_results(message, result)
+            assert message == result
         else:
-            assert compare_messages(message, result.messages[index])
+            assert message == result.messages[index]
         index += 1
 
 
