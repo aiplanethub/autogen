@@ -17,10 +17,10 @@ class QueueUserProxyAgent(UserProxyAgent):
     ):
         super().__init__(name, description="standin agent for user input", **kwargs)
         self.builder_id = builder_id
-        self.builder_queues = builder_queues
-        if builder_id not in self.builder_queues:
-            self.builder_queues[builder_id] = asyncio.Queue(maxsize=1)
-        self.message_queue = self.builder_queues[builder_id]
+        if builder_id not in builder_queues:
+            builder_queues[builder_id] = asyncio.Queue(maxsize=1)
+
+        self.message_queue = builder_queues[builder_id]
         self.model_client = model_client
 
     @override

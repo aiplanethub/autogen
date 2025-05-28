@@ -1,9 +1,7 @@
-from typing import Any, Sequence
-
-from autogen_agentchat.base import ChatAgent
 from autogen_agentchat.agents import AssistantAgent
-from autogen_agentchat.teams import SelectorGroupChat, Swarm
+from autogen_agentchat.base import ChatAgent
 from autogen_agentchat.conditions import HandoffTermination, TextMentionTermination
+from autogen_agentchat.teams import SelectorGroupChat, Swarm
 
 
 def planner_orchestrator(model_client, agents: list[ChatAgent], *args):
@@ -19,9 +17,10 @@ def planner_orchestrator(model_client, agents: list[ChatAgent], *args):
         "TERMINATE", ["terminate"]
     )
     agents.append(terminate)  # add the terminate agent
-    # swarm = Swarm(agents, termination_condition=termination)
+    swarm = Swarm(agents, termination_condition=termination)
 
-    # return swarm
+    return swarm
+
     selector_prompt = """
     Your task is to orchestrate the agents to generate a plan.
     You have {roles}.

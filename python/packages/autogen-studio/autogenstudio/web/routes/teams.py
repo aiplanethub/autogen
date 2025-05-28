@@ -4,9 +4,17 @@ import json
 import traceback
 from typing import Dict
 
-from autogen_agentchat.agents import AssistantAgent
-from autogen_agentchat.messages import TextMessage, UserInputRequestedEvent
+from autogen_agentchat.base._task import TaskResult
+from autogen_agentchat.messages import BaseChatMessage, UserInputRequestedEvent
+from autogen_agentchat.teams import Swarm
 from autogen_ext.models.openai import AzureOpenAIChatCompletionClient
+from autogenstudio.core.config import get_settings
+from autogenstudio.planner.architect_agent import architect_agent
+from autogenstudio.planner.clarification_agent import ClarificationAgent
+from autogenstudio.planner.orchestrator import planner_orchestrator
+from autogenstudio.planner.planner_agent import get_planner_agent
+from autogenstudio.planner.queue_userproxy import QueueUserProxyAgent
+from autogenstudio.utils.constants import PLANNER_PROMPT
 from fastapi import (
     APIRouter,
     Depends,
@@ -21,21 +29,16 @@ from fastapi import (
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from autogenstudio.core.config import get_settings
-from autogenstudio.planner.clarification_agent import ClarificationAgent
-from autogenstudio.planner.orchestrator import planner_orchestrator
-from autogenstudio.planner.planner_agent import get_planner_agent
-from autogenstudio.planner.queue_userproxy import QueueUserProxyAgent
-from autogenstudio.utils.constants import PLANNER_PROMPT
-
+from ...planner.models import SelectorGroupChatModel
 from ...database import DatabaseManager
-from ...datamodel import BuilderMessage, BuilderRole, Gallery, MessageMeta, Team
+from ...datamodel import BuilderRole, Gallery, MessageMeta, Team
 from ...gallery.builder import create_default_gallery
 from ...services.builder import BuilderService
 from ..deps import get_db
 
 router = APIRouter()
 
+websockets: Dict[int, WebSocket] = {}
 builder_queues: Dict[int, asyncio.Queue] = {}
 
 
@@ -74,39 +77,75 @@ async def create_team(team: Team, db=Depends(get_db)) -> Dict:
     return {"status": True, "data": response.data}
 
 
-async def upsert_and_stream(gallery_id, gc, db, prompt: str = ""):
-    try:
-        assistant_message = ""
-        async for chunk in gc.run_stream(task=prompt):
-            if isinstance(chunk, TextMessage) or isinstance(
-                chunk, UserInputRequestedEvent
-            ):
-                data = {
-                    "text": chunk.content,
-                    "role": "USER" if chunk.source == "user_proxy" else "ASSISTANT",
-                }
-                assistant_message += chunk.content
-            else:
-                data = chunk
+async def upsert_and_stream(builder_id: int, gc: Swarm, db, prompt: str = ""):
+    global websockets
 
-            # Store partial response data in the database
-            builder_message_model = BuilderMessage(
-                builder_session_id=gallery_id,
-                role=BuilderRole.ASSISTANT,
-                content=assistant_message,
-                message_meta=json.loads(
+    service = BuilderService(db)
+
+    try:
+        async for chunk in gc.run_stream(task=prompt):
+            if isinstance(chunk, BaseChatMessage):
+                print(chunk.source)
+                message_text = chunk.to_model_text()
+
+                # Try to parse as JSON if it looks like JSON
+                if message_text.strip().startswith(
+                    "{"
+                ) and message_text.strip().endswith("}"):
+                    try:
+                        # Try to parse the message as JSON
+                        json_data = json.loads(message_text)
+                        # If it's from the planner, try to convert it to a SelectorGroupChatModel
+                        if chunk.source.lower() == "planner":
+                            try:
+                                # Validate against the model
+                                model_instance = SelectorGroupChatModel.model_validate(
+                                    json_data
+                                )
+                                received_data = model_instance.model_dump()
+                            except Exception as e:
+                                # If validation fails, just use the raw JSON
+                                received_data = json_data
+                        else:
+                            received_data = json_data
+                    except json.JSONDecodeError:
+                        # If it's not valid JSON, use the raw text
+                        received_data = message_text
+                else:
+                    # Not JSON, use raw text
+                    received_data = message_text
+
+                data = {
+                    "text": received_data,
+                    "role": (
+                        BuilderRole.USER
+                        if chunk.source.lower() in ["user", "user_proxy"]
+                        else BuilderRole.ASSISTANT
+                    ),
+                }
+
+                service.create_message(
+                    builder_id,
+                    data["role"],
+                    message_text,  # Store the original message text
                     MessageMeta(
                         task=prompt,
                         time=datetime.datetime.now(datetime.timezone.utc),
-                    ).model_dump_json()
-                ),
-            )
-            db.upsert(builder_message_model, return_json=False)
+                    ),
+                )
 
-            if isinstance(data, dict):
                 yield f"data: {json.dumps(data)}\n\n"
-            elif isinstance(data, BaseModel):
-                yield f"data: {data.model_dump_json()}\n\n"
+
+            elif isinstance(chunk, UserInputRequestedEvent):
+                print("user input requested")
+                ws = websockets.get(builder_id)
+                if ws:
+                    await ws.send_text("user_input")
+
+            elif isinstance(chunk, TaskResult):
+                print("result", chunk)
+
+        yield ""
 
     except Exception as e:
         error_msg = f"Error in streaming: {str(e)} {traceback.format_exc()}"
@@ -158,8 +197,11 @@ async def plan_team(
         )
 
         planner_agent = get_planner_agent(
-            model_client, prompt, knowledge_base, tools, agents, terminations
+            prompt, knowledge_base, tools, agents, terminations
         )
+
+        # planner_agent = architect_agent()
+
         clarification_agent = ClarificationAgent(
             model_client=model_client,
             kb_collection_name=knowledge_base,
@@ -172,7 +214,7 @@ async def plan_team(
         )
         selector_gc = planner_orchestrator(
             model_client=model_client,
-            agents=[user_proxy_agent, clarification_agent, planner_agent],
+            agents=[clarification_agent, user_proxy_agent, planner_agent],
         )
 
         intermediate_task_result = await selector_gc.save_state()
@@ -190,7 +232,7 @@ async def plan_team(
         )
 
         return StreamingResponse(
-            upsert_and_stream(gallery_id=gallery_id, gc=selector_gc, db=db, prompt=prompt), media_type="text/event-stream"  # type: ignore
+            upsert_and_stream(builder_id=builder_id, gc=selector_gc, db=db, prompt=prompt), media_type="text/event-stream"  # type: ignore
         )
 
     except Exception as e:
@@ -209,6 +251,9 @@ async def websocket_endpoint(
     try:
         if builder_id not in builder_queues:
             builder_queues[builder_id] = asyncio.Queue(maxsize=1)
+
+        if builder_id not in websockets:
+            websockets[builder_id] = websocket
 
         # Send initial connection message
         await websocket.send_json({"status": "connected", "builder_id": builder_id})
