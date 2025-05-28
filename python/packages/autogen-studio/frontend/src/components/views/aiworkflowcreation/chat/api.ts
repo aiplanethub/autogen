@@ -1,4 +1,3 @@
-import { Gallery } from "../../../types/datamodel";
 import { BaseAPI } from "../../../utils/baseapi";
 
 import {
@@ -13,7 +12,7 @@ export class ChatAPI extends BaseAPI {
             builder_id: number;
             gallery_id: number;
             prompt: string;
-            knowledge_base?: string; // not implemented in ui
+            // knowledge_base?: string; // not implemented in ui
         },
         controller: AbortController,
         on_message: (data: any) => void
@@ -24,11 +23,12 @@ export class ChatAPI extends BaseAPI {
         formData.append("gallery_id", data.gallery_id.toString());
         formData.append("prompt", data.prompt);
 
-        if (data.knowledge_base)
-            formData.append("knowledge_base", data.knowledge_base);
+        // if (data.knowledge_base)
+        //     formData.append("knowledge_base", data.knowledge_base);
 
         await fetchEventSource(`${this.getBaseUrl()}/teams/plan`, {
             method: "POST",
+            headers: this.getHeaders("multipart/form-data"),
             body: formData,
             signal: controller.signal,
             async onopen(response) {
@@ -93,19 +93,9 @@ export class ChatAPI extends BaseAPI {
         return url
     }
 
-    setupWebsocketConnection(builder_id: number, on_message: (event: MessageEvent) => void) {
+    setupWebsocketConnection(builder_id: number) {
         const ws_url = this.getWebsocketURL().replace("builder_id", builder_id.toString())
-
         const socket = new WebSocket(ws_url)
-
-        socket.onopen = () => {
-            console.log("websocket connected")
-        }
-
-        socket.onmessage = (event) => {
-            on_message(event)
-        }
-
         return socket
     }
 }

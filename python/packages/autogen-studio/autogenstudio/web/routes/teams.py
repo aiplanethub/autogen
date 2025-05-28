@@ -2,19 +2,19 @@ import asyncio
 import datetime
 import json
 import traceback
-from typing import Dict
+from typing import Dict, Optional
+from loguru import logger
+import logging
 
 from autogen_agentchat.base._task import TaskResult
 from autogen_agentchat.messages import BaseChatMessage, UserInputRequestedEvent
 from autogen_agentchat.teams import Swarm
 from autogen_ext.models.openai import AzureOpenAIChatCompletionClient
 from autogenstudio.core.config import get_settings
-from autogenstudio.planner.architect_agent import architect_agent
 from autogenstudio.planner.clarification_agent import ClarificationAgent
 from autogenstudio.planner.orchestrator import planner_orchestrator
 from autogenstudio.planner.planner_agent import get_planner_agent
 from autogenstudio.planner.queue_userproxy import QueueUserProxyAgent
-from autogenstudio.utils.constants import PLANNER_PROMPT
 from fastapi import (
     APIRouter,
     Depends,
@@ -27,12 +27,11 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
 
-from ...planner.models import SelectorGroupChatModel
 from ...database import DatabaseManager
 from ...datamodel import BuilderRole, Gallery, MessageMeta, Team
 from ...gallery.builder import create_default_gallery
+from ...planner.models import SelectorGroupChatModel
 from ...services.builder import BuilderService
 from ..deps import get_db
 
@@ -40,6 +39,8 @@ router = APIRouter()
 
 websockets: Dict[int, WebSocket] = {}
 builder_queues: Dict[int, asyncio.Queue] = {}
+
+logging.basicConfig(level=logging.DEBUG)
 
 
 @router.get("/")
@@ -160,84 +161,82 @@ async def plan_team(
     builder_id: int = Form(...),
     gallery_id: int = Form(...),
     prompt: str = Form(...),
-    knowledge_base: str = Form(...),
-    file: UploadFile = File(None),
-    db=Depends(get_db),
+    # knowledge_base: Optional[str] = Form(...),
+    # file: Optional[UploadFile] = File(None),
+    db: DatabaseManager = Depends(get_db),
 ) -> Dict:
-    try:
-        settings = get_settings()
-        service = BuilderService(db)
-        result = db.get(Gallery, filters={"id": gallery_id})
-        if not result.data or len(result.data) == 0:
-            # create a default gallery entry
-            gallery_config = create_default_gallery()
-            default_gallery = Gallery(id=gallery_id, config=gallery_config.model_dump())
-            db.upsert(default_gallery)
-            result = db.get(Gallery, filters={"id": gallery_id})
+    # try:
+    #     settings = get_settings()
+    #     service = BuilderService(db)
+    #     result = db.get(Gallery, filters={"id": gallery_id})
+    #     if not result.data or len(result.data) == 0:
+    #         # create a default gallery entry
+    #         gallery_config = create_default_gallery()
+    #         default_gallery = Gallery(id=gallery_id, config=gallery_config.model_dump())
+    #         result = db.upsert(default_gallery, return_json=False)
 
-        tools = result.data[0].config["components"]["tools"]
-        agents = result.data[0].config["components"]["agents"]
-        terminations = result.data[0].config["components"]["terminations"]
+    #     tools = result.data[0].config["components"]["tools"]
+    #     agents = result.data[0].config["components"]["agents"]
+    #     terminations = result.data[0].config["components"]["terminations"]
 
-        # update builder config selection
-        service.update_config_selection(
-            builder_id,
-            [agent["label"] for agent in agents],
-            [tool["label"] for tool in tools],
-            [knowledge_base],
-            gallery_id,
-        )
+    #     # update builder config selection
+    #     service.update_config_selection(
+    #         builder_id,
+    #         [agent["label"] for agent in agents],
+    #         [tool["label"] for tool in tools],
+    #         [],
+    #         gallery_id,
+    #     )
 
-        model_client = AzureOpenAIChatCompletionClient(
-            azure_deployment=settings.AZURE_DEPLOYMENT,
-            api_key=settings.AZURE_API_KEY,
-            api_version=settings.AZURE_VERSION,
-            azure_endpoint=settings.AZURE_ENDPOINT,
-            model=settings.AZURE_MODEL,
-        )
+    #     model_client = AzureOpenAIChatCompletionClient(
+    #         azure_deployment=settings.AZURE_DEPLOYMENT,
+    #         api_key=settings.AZURE_API_KEY,
+    #         api_version=settings.AZURE_VERSION,
+    #         azure_endpoint=settings.AZURE_ENDPOINT,
+    #         model=settings.AZURE_MODEL,
+    #     )
 
-        planner_agent = get_planner_agent(
-            prompt, knowledge_base, tools, agents, terminations
-        )
+    #     planner_agent = get_planner_agent()
 
-        # planner_agent = architect_agent()
+    #     clarification_agent = ClarificationAgent(
+    #         model_client=model_client,
+    #         kb_collection_name=knowledge_base,
+    #     )
+    #     if gallery_id not in builder_queues:
+    #         builder_queues[gallery_id] = asyncio.Queue(maxsize=1)
 
-        clarification_agent = ClarificationAgent(
-            model_client=model_client,
-            kb_collection_name=knowledge_base,
-        )
-        if gallery_id not in builder_queues:
-            builder_queues[gallery_id] = asyncio.Queue(maxsize=1)
+    #     user_proxy_agent = QueueUserProxyAgent(
+    #         "user_proxy", model_client, builder_id, builder_queues
+    #     )
+    #     selector_gc = planner_orchestrator(
+    #         model_client=model_client,
+    #         agents=[clarification_agent, user_proxy_agent, planner_agent],
+    #     )
 
-        user_proxy_agent = QueueUserProxyAgent(
-            "user_proxy", model_client, builder_id, builder_queues
-        )
-        selector_gc = planner_orchestrator(
-            model_client=model_client,
-            agents=[clarification_agent, user_proxy_agent, planner_agent],
-        )
+    #     intermediate_task_result = await selector_gc.save_state()
+    #     print("intermediate: ", intermediate_task_result)
 
-        intermediate_task_result = await selector_gc.save_state()
-        print("intermediate: ", intermediate_task_result)
+    #     service.create_message(
+    #         builder_id,
+    #         BuilderRole.USER,
+    #         prompt,
+    #         MessageMeta(
+    #             task=prompt,
+    #             time=datetime.datetime.now(datetime.timezone.utc),
+    #             summary_method=json.dumps(intermediate_task_result),
+    #         ),
+    #     )
 
-        service.create_message(
-            builder_id,
-            BuilderRole.USER,
-            prompt,
-            MessageMeta(
-                task=prompt,
-                time=datetime.datetime.now(datetime.timezone.utc),
-                summary_method=json.dumps(intermediate_task_result),
-            ),
-        )
+    #     return StreamingResponse(
+    #         upsert_and_stream(builder_id=builder_id, gc=selector_gc, db=db, prompt=prompt), media_type="text/event-stream"  # type: ignore
+    #     )
 
-        return StreamingResponse(
-            upsert_and_stream(builder_id=builder_id, gc=selector_gc, db=db, prompt=prompt), media_type="text/event-stream"  # type: ignore
-        )
+    # except Exception as e:
+    #     print(e)
+    #     logger.exception(f"Error in planning: {str(e)}")
+    #     return Response(status=False, data=[], message=f"Error in planning: {str(e)}")  # type: ignore
 
-    except Exception as e:
-        print(f"Error in planning: {str(e)} {traceback.format_exc()}")
-        return Response(status=False, data=[], message=f"Error in planning: {str(e)}")  # type: ignore
+    return Response(status=501, data=[], message="Not implemented")
 
 
 @router.websocket("/ws/{builder_id}")

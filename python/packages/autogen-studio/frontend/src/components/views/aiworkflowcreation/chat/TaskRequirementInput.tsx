@@ -19,18 +19,15 @@ import { chatAPI } from "./api";
 
 type Props = {
   hasConversations: boolean;
-  taskRequirement: string;
-  setTaskRequirement: React.Dispatch<React.SetStateAction<string>>;
   builder_id: number;
-  build_agent_callback: () => void
+  setConversations: React.Dispatch<React.SetStateAction<any[]>>
 };
+
 
 const TaskRequirementInput: React.FC<Props> = ({
   hasConversations,
-  taskRequirement,
-  setTaskRequirement,
   builder_id,
-  build_agent_callback
+  setConversations
 }) => {
   const [messageApi, contextHolder] = message.useMessage();
   const [isLoading, setIsLoading] = useState(false);
@@ -42,6 +39,8 @@ const TaskRequirementInput: React.FC<Props> = ({
   );
   const [websocket, setWebSocket] = useState<WebSocket | null>(null)
   const [textAreaDisabled, setTextAreaDisabled] = useState(false)
+  const [controller, setController] = useState<AbortController | null>(null)
+  const [taskRequirement, setTaskRequirement] = useState("");
 
   const [selectedPrompt, setSelectedPrompt] = useState<IPrompt | null>(null);
   const { user } = useContext(appContext);
@@ -72,24 +71,6 @@ const TaskRequirementInput: React.FC<Props> = ({
       setIsLoading(false);
     }
   }, [user?.id, messageApi]);
-
-  useEffect(() => {
-    if (websocket) {
-      return
-    }
-
-    const ws = chatAPI.setupWebsocketConnection(builder_id, (event) => {
-      console.log(event)
-    })
-
-    setWebSocket(ws)
-
-    return () => {
-      ws.close()
-    }
-
-
-  }, [websocket])
 
   useEffect(() => {
     fetchGalleries();
@@ -145,6 +126,74 @@ const TaskRequirementInput: React.FC<Props> = ({
     setSelectedPrompt(prompt);
     setIsOpen(false);
   };
+
+  const setupWebSocket = () => {
+    const ws = chatAPI.setupWebsocketConnection(builder_id)
+
+    ws.onmessage = (event) => {
+      console.log(event)
+      if (event.data === "user_input") {
+        setTextAreaDisabled(false)
+      }
+    }
+
+    ws.onopen = () => {
+      console.log("websocket connected")
+      setWebSocket(ws)
+    }
+
+    ws.onclose = () => {
+      console.log("websocket closed")
+      setWebSocket(null)
+    }
+  }
+
+  const onUserInput = async () => {
+    if (!selectedGallery) {
+      messageApi.error("Select a gallery first")
+      return
+    }
+
+    // setup websocket if not already setup
+    if (!websocket) {
+      setupWebSocket()
+    }
+
+    try {
+      if (!hasConversations) {
+        // on the first user input
+
+        // stop the previous request and start a new one
+        if (controller) {
+          controller.abort()
+          setController(new AbortController())
+        }
+
+        if (!controller) {
+          setController(new AbortController())
+        }
+
+        await chatAPI.streamConversations({
+          builder_id: builder_id,
+          gallery_id: selectedGallery.id as number,
+          prompt: taskRequirement,
+          // knowledge_base: knowledge_base
+        }, controller!, (data: { id: string; data: any }) => {
+          console.log("new message: ", data);
+          setConversations((prev) => [...prev, { id: data.id, role: data.data.role, content: data.data.text }]);
+        })
+      } else {
+        // send user input if requested
+        websocket?.send(JSON.stringify({ message: taskRequirement }))
+      }
+
+      setTextAreaDisabled(true)
+    } catch (error) {
+      console.error("Error streaming conversations:", error);
+      messageApi.error("Failed to stream conversations");
+      setTextAreaDisabled(false)
+    }
+  }
 
   return (
     <div
@@ -210,7 +259,8 @@ const TaskRequirementInput: React.FC<Props> = ({
           </div>
 
           <Button
-            onClick={build_agent_callback}
+            disabled={textAreaDisabled}
+            onClick={onUserInput}
             className={cn(
               "bg-[#115E59] hover:bg-green-800 text-white py-2 px-4 rounded-lg flex items-center transition-colors font-medium text-sm",
               hasConversations && "px-2"
