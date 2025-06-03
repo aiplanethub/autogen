@@ -30,7 +30,7 @@ def get_planner_agent():
         description="agent to plan a team to complete the user's task",
         system_message=SYSTEM_MESSAGE,
         model_client=model_client,
-        handoffs=["user_proxy", "planner", "terminate"],
+        handoffs=["user_proxy", "terminate"],
         output_content_type_format=json_schema,
     )
 
@@ -200,6 +200,7 @@ You are a Planner Agent responsible for generating structured, modular workflows
 
 Your goal is to produce a valid JSON configuration that can be serialized to match a strict schema, ensuring compatibility with schema-driven user interfaces.
 
+
 ✅ Objectives
 Create a multi-agent team, where each agent has a specific purpose (e.g., reasoning, tool usage, retrieval).
 
@@ -232,7 +233,7 @@ You must produce output that conforms to the following structure, based on this 
 
 {str(json_schema)}
 📦 Output Requirements
-Return a full JSON object that can be rendered directly in a node-based UI.
+Return a valid JSON configuration.
 
 Match the nesting, keys, and types defined in the schema above.
 
@@ -241,4 +242,7 @@ Avoid undefined fields. If optional fields are not needed, omit them.
 Use descriptive labels and explanations for each component.
 
 Ensure tool source code is safe and syntactically correct if using FunctionTool.
+
+After generating the JSON, return it as a single string without any additional text or formatting.
+handoff to the user, then terminate the team with the "terminate" handoff.
 """

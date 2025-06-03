@@ -144,12 +144,14 @@ class BuilderService:
 
         return session.workflow_config
 
-    def get_config_selection(self, builder_id: int) -> BuilderConfigSelection:
+    def get_config_selection(self, builder_id: int) -> BuilderConfigSelection | None:
         filters = {"builder_session_id": builder_id}
         response = self.db.get(BuilderConfigSelection, filters)
 
-        print(response.data)
-        if response.status and response.data:
+        if response.status:
+            if len(response.data) == 0:
+                return None
+
             return response.data[0]
 
         raise Exception(response.message)
@@ -164,6 +166,8 @@ class BuilderService:
     ):
 
         builder_config = self.get_config_selection(builder_id)
+        if not builder_config:
+            builder_config = BuilderConfigSelection(builder_session_id=builder_id)
 
         if agents:
             builder_config.agents = agents

@@ -40,8 +40,6 @@ router = APIRouter()
 websockets: Dict[int, WebSocket] = {}
 builder_queues: Dict[int, asyncio.Queue] = {}
 
-logging.basicConfig(level=logging.DEBUG)
-
 
 @router.get("/")
 async def list_teams(user_id: str, db=Depends(get_db)) -> Dict:
@@ -85,8 +83,16 @@ async def upsert_and_stream(builder_id: int, gc: Swarm, db, prompt: str = ""):
 
     try:
         async for chunk in gc.run_stream(task=prompt):
+
             if isinstance(chunk, BaseChatMessage):
-                print(chunk.source)
+                if chunk.type == "HandoffMessage":
+                    print("HandoffMessage received, skipping")
+                    print(chunk.to_model_text())
+                    continue
+
+                print("############################################")
+                print(chunk.source, chunk.type)
+                print(chunk.to_model_text())
                 message_text = chunk.to_model_text()
 
                 # Try to parse as JSON if it looks like JSON
@@ -161,82 +167,70 @@ async def plan_team(
     builder_id: int = Form(...),
     gallery_id: int = Form(...),
     prompt: str = Form(...),
-    # knowledge_base: Optional[str] = Form(...),
+    knowledge_base: Optional[str] = Form(default=None),
     # file: Optional[UploadFile] = File(None),
     db: DatabaseManager = Depends(get_db),
 ) -> Dict:
-    # try:
-    #     settings = get_settings()
-    #     service = BuilderService(db)
-    #     result = db.get(Gallery, filters={"id": gallery_id})
-    #     if not result.data or len(result.data) == 0:
-    #         # create a default gallery entry
-    #         gallery_config = create_default_gallery()
-    #         default_gallery = Gallery(id=gallery_id, config=gallery_config.model_dump())
-    #         result = db.upsert(default_gallery, return_json=False)
+    try:
+        settings = get_settings()
+        service = BuilderService(db)
+        result = db.get(Gallery, filters={"id": gallery_id})
+        if not result.data or len(result.data) == 0:
+            # create a default gallery entry
+            gallery_config = create_default_gallery()
+            default_gallery = Gallery(id=gallery_id, config=gallery_config.model_dump())
+            result = db.upsert(default_gallery, return_json=False)
 
-    #     tools = result.data[0].config["components"]["tools"]
-    #     agents = result.data[0].config["components"]["agents"]
-    #     terminations = result.data[0].config["components"]["terminations"]
+        tools = result.data[0].config["components"]["tools"]
+        agents = result.data[0].config["components"]["agents"]
+        terminations = result.data[0].config["components"]["terminations"]
 
-    #     # update builder config selection
-    #     service.update_config_selection(
-    #         builder_id,
-    #         [agent["label"] for agent in agents],
-    #         [tool["label"] for tool in tools],
-    #         [],
-    #         gallery_id,
-    #     )
+        # update builder config selection
+        service.update_config_selection(
+            builder_id,
+            [agent["label"] for agent in agents],
+            [tool["label"] for tool in tools],
+            [],
+            gallery_id,
+        )
 
-    #     model_client = AzureOpenAIChatCompletionClient(
-    #         azure_deployment=settings.AZURE_DEPLOYMENT,
-    #         api_key=settings.AZURE_API_KEY,
-    #         api_version=settings.AZURE_VERSION,
-    #         azure_endpoint=settings.AZURE_ENDPOINT,
-    #         model=settings.AZURE_MODEL,
-    #     )
+        model_client = AzureOpenAIChatCompletionClient(
+            azure_deployment=settings.AZURE_DEPLOYMENT,
+            api_key=settings.AZURE_API_KEY,
+            api_version=settings.AZURE_VERSION,
+            azure_endpoint=settings.AZURE_ENDPOINT,
+            model=settings.AZURE_MODEL,
+        )
 
-    #     planner_agent = get_planner_agent()
+        planner_agent = get_planner_agent()
 
-    #     clarification_agent = ClarificationAgent(
-    #         model_client=model_client,
-    #         kb_collection_name=knowledge_base,
-    #     )
-    #     if gallery_id not in builder_queues:
-    #         builder_queues[gallery_id] = asyncio.Queue(maxsize=1)
+        clarification_agent = ClarificationAgent(
+            model_client=model_client,
+            kb_collection_name=knowledge_base,
+        )
 
-    #     user_proxy_agent = QueueUserProxyAgent(
-    #         "user_proxy", model_client, builder_id, builder_queues
-    #     )
-    #     selector_gc = planner_orchestrator(
-    #         model_client=model_client,
-    #         agents=[clarification_agent, user_proxy_agent, planner_agent],
-    #     )
+        # create the queue for user input
+        builder_queues.setdefault(builder_id, asyncio.Queue(maxsize=1))
 
-    #     intermediate_task_result = await selector_gc.save_state()
-    #     print("intermediate: ", intermediate_task_result)
+        user_proxy_agent = QueueUserProxyAgent(
+            "user_proxy", model_client, builder_queues[builder_id]
+        )
+        selector_gc = planner_orchestrator(
+            model_client=model_client,
+            agents=[clarification_agent, user_proxy_agent, planner_agent],
+        )
 
-    #     service.create_message(
-    #         builder_id,
-    #         BuilderRole.USER,
-    #         prompt,
-    #         MessageMeta(
-    #             task=prompt,
-    #             time=datetime.datetime.now(datetime.timezone.utc),
-    #             summary_method=json.dumps(intermediate_task_result),
-    #         ),
-    #     )
+        return StreamingResponse(
+            upsert_and_stream(
+                builder_id=builder_id, gc=selector_gc, db=db, prompt=prompt
+            ),
+            media_type="text/event-stream",
+        )
 
-    #     return StreamingResponse(
-    #         upsert_and_stream(builder_id=builder_id, gc=selector_gc, db=db, prompt=prompt), media_type="text/event-stream"  # type: ignore
-    #     )
-
-    # except Exception as e:
-    #     print(e)
-    #     logger.exception(f"Error in planning: {str(e)}")
-    #     return Response(status=False, data=[], message=f"Error in planning: {str(e)}")  # type: ignore
-
-    return Response(status=501, data=[], message="Not implemented")
+    except Exception as e:
+        print(e)
+        logger.exception(f"Error in planning: {str(e)}")
+        return HTTPException(status_code=500, detail=f"Error in planning: {str(e)}")
 
 
 @router.websocket("/ws/{builder_id}")
@@ -248,38 +242,21 @@ async def websocket_endpoint(
     await websocket.accept()
 
     try:
-        if builder_id not in builder_queues:
-            builder_queues[builder_id] = asyncio.Queue(maxsize=1)
-
-        if builder_id not in websockets:
-            websockets[builder_id] = websocket
+        builder_queues.setdefault(builder_id, asyncio.Queue(maxsize=1))
+        websockets.setdefault(builder_id, websocket)
+        queue = builder_queues[builder_id]
 
         # Send initial connection message
         await websocket.send_json({"status": "connected", "builder_id": builder_id})
-
-        service = BuilderService(db)
 
         while True:
             data = await websocket.receive_text()
             message = json.loads(data)
 
-            if not builder_queues[builder_id].full():
-                await builder_queues[builder_id].put(message["message"])
+            print(f"Received message for builder_id {builder_id}: {message}")
+            await queue.put(message["message"])
 
-                service.create_message(
-                    builder_id,
-                    BuilderRole.USER,
-                    message["message"],
-                    MessageMeta(
-                        task=message["message"],
-                        time=datetime.datetime.now(datetime.timezone.utc),
-                    ),
-                )
-                await websocket.send_json({"status": "message_received"})
-            else:
-                await websocket.send_json(
-                    {"status": "error", "message": "Queue full, wait for processing"}
-                )
+            await websocket.send_json({"status": "message_received"})
 
     except WebSocketDisconnect:
         print(f"Client disconnected for builder_id: {builder_id}")

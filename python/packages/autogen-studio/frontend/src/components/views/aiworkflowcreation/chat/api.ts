@@ -28,10 +28,12 @@ export class ChatAPI extends BaseAPI {
 
         await fetchEventSource(`${this.getBaseUrl()}/teams/plan`, {
             method: "POST",
-            headers: this.getHeaders("multipart/form-data"),
+            headers: {},
             body: formData,
             signal: controller.signal,
+            credentials: "include",
             async onopen(response) {
+                console.log("onopen", response);
                 if (
                     response.ok &&
                     response.headers.get("content-type") === EventStreamContentType
@@ -64,7 +66,6 @@ export class ChatAPI extends BaseAPI {
             onclose() {
                 // if the server closes the connection unexpectedly, retry:
                 console.log("onclose");
-                controller.abort()
                 // throw new RetriableError();
             },
             onerror(err) {

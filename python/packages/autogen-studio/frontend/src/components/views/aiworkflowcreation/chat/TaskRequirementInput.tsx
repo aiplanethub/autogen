@@ -166,28 +166,29 @@ const TaskRequirementInput: React.FC<Props> = ({
         // stop the previous request and start a new one
         if (controller) {
           controller.abort()
-          setController(new AbortController())
         }
 
-        if (!controller) {
-          setController(new AbortController())
-        }
+        let new_controller: AbortController | null = new AbortController()
 
         await chatAPI.streamConversations({
           builder_id: builder_id,
           gallery_id: selectedGallery.id as number,
           prompt: taskRequirement,
           // knowledge_base: knowledge_base
-        }, controller!, (data: { id: string; data: any }) => {
+        }, new_controller!, (data: { id: string; data: any }) => {
+          const _data = JSON.parse(data.data)
           console.log("new message: ", data);
-          setConversations((prev) => [...prev, { id: data.id, role: data.data.role, content: data.data.text }]);
+          setConversations((prev) => [...prev, { id: data.id, role: _data.role, content: _data.text }]);
         })
+
+        setController(new_controller)
       } else {
         // send user input if requested
         websocket?.send(JSON.stringify({ message: taskRequirement }))
       }
 
       setTextAreaDisabled(true)
+      setTaskRequirement("")
     } catch (error) {
       console.error("Error streaming conversations:", error);
       messageApi.error("Failed to stream conversations");

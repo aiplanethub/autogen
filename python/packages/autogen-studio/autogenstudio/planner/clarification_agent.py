@@ -4,20 +4,9 @@ from autogen_agentchat.agents import AssistantAgent
 from autogen_agentchat.messages import TextMessage
 from autogen_core.models import ChatCompletionClient, UserMessage
 from autogen_core.tools import BaseTool
-from pydantic import BaseModel, Field
 from typing_extensions import override
-from weaviate import WeaviateClient
 
 from autogenstudio.services.weaviate_service import WeaviateService
-
-
-class ClarificationAgentResponse(BaseModel):
-    """Output model for the agent."""
-
-    questions: list[str] = Field(..., description="List of questions to ask the user.")
-    is_clarification_needed: bool = Field(
-        ..., description="Flag indicating if clarification is needed."
-    )
 
 
 class ClarificationAgent(AssistantAgent):
@@ -38,7 +27,6 @@ class ClarificationAgent(AssistantAgent):
             system_message=system_prompt,
             model_client=model_client,
             model_client_stream=False,
-            output_content_type=ClarificationAgentResponse,
             tools=tools,
             handoffs=["user_proxy", "planner"],
         )

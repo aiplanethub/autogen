@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import Conversations from "./Conversations";
 import TaskRequirementInput from "./TaskRequirementInput";
 
-type RoleType = "AI" | "USER";
+type RoleType = "assistant" | "user";
 
 export interface IConversation {
   id: string;
@@ -18,7 +18,6 @@ type Props = {
 
 const Assistant = (props: Props) => {
   const [conversations, setConversations] = useState<Array<IConversation>>([]);
-
 
   return (
     <div className="flex flex-col justify-center items-center w-full h-full max-h-[calc(100vh_-_158px)]">

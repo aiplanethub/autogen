@@ -11,16 +11,12 @@ class QueueUserProxyAgent(UserProxyAgent):
         self,
         name: str,
         model_client: ChatCompletionClient,
-        builder_id: int,
-        builder_queues: dict,
+        queue: asyncio.Queue,
         **kwargs
     ):
         super().__init__(name, description="standin agent for user input", **kwargs)
-        self.builder_id = builder_id
-        if builder_id not in builder_queues:
-            builder_queues[builder_id] = asyncio.Queue(maxsize=1)
 
-        self.message_queue = builder_queues[builder_id]
+        self.message_queue = queue
         self.model_client = model_client
 
     @override
