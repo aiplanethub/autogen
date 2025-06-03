@@ -9,7 +9,7 @@ import { IConversation } from "./Assistant";
 const AgentChatMessage: React.FC<{ conversation: IConversation }> = ({
   conversation,
 }) => {
-  const isSender = conversation.role === "USER";
+  const isSender = conversation.role === "user";
 
   return (
     <div

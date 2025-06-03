@@ -15,19 +15,33 @@ import { appContext } from "../../../../hooks/provider";
 import { galleryAPI } from "../../gallery/api";
 import PromptModal from "../options/prompts/PromptModal";
 import { cn } from "../../../utils/utils";
+import { chatAPI } from "./api";
 
-const TaskRequirementInput: React.FC<{ hasConversations: boolean }> = ({
+type Props = {
+  hasConversations: boolean;
+  builder_id: number;
+  setConversations: React.Dispatch<React.SetStateAction<any[]>>
+};
+
+
+const TaskRequirementInput: React.FC<Props> = ({
   hasConversations,
+  builder_id,
+  setConversations
 }) => {
   const [messageApi, contextHolder] = message.useMessage();
   const [isLoading, setIsLoading] = useState(false);
   const [galleries, setGalleries] = useState<IGalleryProps[]>([]);
-  const [taskRequirement, setTaskRequirement] = useState("");
   const [modalScreen, setModalScreen] = useState<ModalScreens>("gallery");
   const [isOpen, setIsOpen] = useState(false);
   const [selectedGallery, setSelectedGallery] = useState<IGalleryProps | null>(
     null
   );
+  const [websocket, setWebSocket] = useState<WebSocket | null>(null)
+  const [textAreaDisabled, setTextAreaDisabled] = useState(false)
+  const [controller, setController] = useState<AbortController | null>(null)
+  const [taskRequirement, setTaskRequirement] = useState("");
+
   const [selectedPrompt, setSelectedPrompt] = useState<IPrompt | null>(null);
   const { user } = useContext(appContext);
   const fetchGalleries = useCallback(async () => {
@@ -113,6 +127,75 @@ const TaskRequirementInput: React.FC<{ hasConversations: boolean }> = ({
     setIsOpen(false);
   };
 
+  const setupWebSocket = () => {
+    const ws = chatAPI.setupWebsocketConnection(builder_id)
+
+    ws.onmessage = (event) => {
+      console.log(event)
+      if (event.data === "user_input") {
+        setTextAreaDisabled(false)
+      }
+    }
+
+    ws.onopen = () => {
+      console.log("websocket connected")
+      setWebSocket(ws)
+    }
+
+    ws.onclose = () => {
+      console.log("websocket closed")
+      setWebSocket(null)
+    }
+  }
+
+  const onUserInput = async () => {
+    if (!selectedGallery) {
+      messageApi.error("Select a gallery first")
+      return
+    }
+
+    // setup websocket if not already setup
+    if (!websocket) {
+      setupWebSocket()
+    }
+
+    try {
+      if (!hasConversations) {
+        // on the first user input
+
+        // stop the previous request and start a new one
+        if (controller) {
+          controller.abort()
+        }
+
+        let new_controller: AbortController | null = new AbortController()
+
+        await chatAPI.streamConversations({
+          builder_id: builder_id,
+          gallery_id: selectedGallery.id as number,
+          prompt: taskRequirement,
+          // knowledge_base: knowledge_base
+        }, new_controller!, (data: { id: string; data: any }) => {
+          const _data = JSON.parse(data.data)
+          console.log("new message: ", data);
+          setConversations((prev) => [...prev, { id: data.id, role: _data.role, content: _data.text }]);
+        })
+
+        setController(new_controller)
+      } else {
+        // send user input if requested
+        websocket?.send(JSON.stringify({ message: taskRequirement }))
+      }
+
+      setTextAreaDisabled(true)
+      setTaskRequirement("")
+    } catch (error) {
+      console.error("Error streaming conversations:", error);
+      messageApi.error("Failed to stream conversations");
+      setTextAreaDisabled(false)
+    }
+  }
+
   return (
     <div
       className={cn(
@@ -134,6 +217,7 @@ const TaskRequirementInput: React.FC<{ hasConversations: boolean }> = ({
         )}
       >
         <Textarea
+          disabled={textAreaDisabled}
           className="w-full p-3 focus:ring-0 focus:outline-none text-base bg-transparent font-normal placeholder:text-gray-400 mb-3"
           placeholder="Type a prompt to complete a task"
           rows={hasConversations ? 1 : 3}
@@ -144,7 +228,7 @@ const TaskRequirementInput: React.FC<{ hasConversations: boolean }> = ({
         <div className="flex items-center justify-between">
           <div className="flex space-x-2">
             <Button
-              onClick={() => {}}
+              onClick={() => { }}
               className="w-8 h-8 rounded-full hover:bg-secondary transition-colors border border-secondary flex justify-center items-center"
             >
               <Icon name="paperclip" className="h-4 w-4" />
@@ -176,6 +260,8 @@ const TaskRequirementInput: React.FC<{ hasConversations: boolean }> = ({
           </div>
 
           <Button
+            disabled={textAreaDisabled}
+            onClick={onUserInput}
             className={cn(
               "bg-[#115E59] hover:bg-green-800 text-white py-2 px-4 rounded-lg flex items-center transition-colors font-medium text-sm",
               hasConversations && "px-2"

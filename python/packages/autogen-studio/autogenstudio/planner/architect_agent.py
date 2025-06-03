@@ -20,7 +20,7 @@ class ArchitectConfig(BaseModel):
 
 
 SYSTEM_MESSAGE = """
-    You are a team configuration agent. When you respond, output a JSON object that matches the ArchitectConfig schema.
+You are a team configuration agent. When you respond, output a JSON object that matches the ArchitectConfig schema.
 
 The schema requires:
 - "provider": The provider of the team component (e.g., "autogen_agentchat.teams.SelectorGroupChat")
@@ -56,7 +56,7 @@ Each participant must have:
   - "tool_call_summary_format": The format for tool call summaries
 
 Provide only the JSON object that matches this schema without additional text.
-    """
+"""
 
 
 def architect_agent(model_client, tools: list = None, memory: list = None):

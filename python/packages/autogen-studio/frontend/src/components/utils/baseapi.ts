@@ -1,17 +1,19 @@
 import { getServerUrl } from "./utils";
 
+type ContentType = "application/json" | "multipart/form-data" | "application/x-www-form-urlencoded";
+
 // baseApi.ts
 export abstract class BaseAPI {
   protected getBaseUrl(): string {
     return getServerUrl();
   }
 
-  protected getHeaders(): HeadersInit {
+  protected getHeaders(content_type?: ContentType) {
     // Get auth token from localStorage
     const token = localStorage.getItem("auth_token");
 
     const headers: HeadersInit = {
-      "Content-Type": "application/json",
+      "Content-Type": content_type ?? "application/json", // use json by default
     };
 
     // Add authorization header if token exists

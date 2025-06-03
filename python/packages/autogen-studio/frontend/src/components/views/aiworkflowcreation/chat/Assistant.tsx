@@ -2,48 +2,29 @@ import React, { useState } from "react";
 import Conversations from "./Conversations";
 import TaskRequirementInput from "./TaskRequirementInput";
 
-type RoleType = "AI" | "USER";
+type RoleType = "assistant" | "user";
 
 export interface IConversation {
+  id: string;
   role: RoleType;
   content: string;
 }
 
-const Assistant = () => {
-  const [conversations, setConversations] = useState<Array<IConversation>>([
-    { role: "USER", content: "create a agent" },
-    { role: "AI", content: "sure" },
-    { role: "USER", content: "create a agent" },
-    { role: "AI", content: "sure" },
-    { role: "USER", content: "create a agent" },
-    { role: "AI", content: "sure" },
-    { role: "USER", content: "create a agent" },
-    { role: "AI", content: "sure" },
-    { role: "USER", content: "create a agent" },
-    { role: "AI", content: "sure" },
-    { role: "USER", content: "create a agent" },
-    { role: "AI", content: "sure" },
-    { role: "USER", content: "create a agent" },
-    { role: "AI", content: "sure" },
-    { role: "USER", content: "create a agent" },
-    { role: "AI", content: "sure" },
-    { role: "USER", content: "create a agent" },
-    { role: "AI", content: "sure" },
-    { role: "AI", content: "sure" },
-    { role: "USER", content: "create a agent" },
-    { role: "AI", content: "sure" },
-    { role: "USER", content: "create a agent" },
-    { role: "AI", content: "sure" },
-    { role: "USER", content: "create a agent" },
-    { role: "AI", content: "sure" },
-  ]);
+type Props = {
+  builder_id: number
+  gallery_id?: number
+  // knowledge_base: string
+}
+
+const Assistant = (props: Props) => {
+  const [conversations, setConversations] = useState<Array<IConversation>>([]);
 
   return (
     <div className="flex flex-col justify-center items-center w-full h-full max-h-[calc(100vh_-_158px)]">
       {conversations.length > 0 && (
         <Conversations conversations={conversations} />
       )}
-      <TaskRequirementInput hasConversations={conversations?.length > 0} />
+      <TaskRequirementInput setConversations={setConversations} builder_id={props.builder_id} hasConversations={conversations.length > 0} />
     </div>
   );
 };

@@ -16,8 +16,8 @@ const Conversations: React.FC<{ conversations: Array<IConversation> }> = ({
     <div className="flex w-full h-full items-end px-4 py-2 max-h-[calc(100vh_-_290px)]">
       <div className="flex flex-col space-y-4 w-full h-full overflow-y-auto">
         <div ref={messagesEndRef}>
-          {conversations.map((conversation, idx) => (
-            <Message conversation={conversation} />
+          {conversations.map((conversation) => (
+            <Message key={conversation.id} conversation={conversation} />
           ))}
         </div>
       </div>

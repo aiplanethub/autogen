@@ -1,23 +1,12 @@
 from typing import Optional
-from typing_extensions import override
 
-from autogen_agentchat.messages import TextMessage
 from autogen_agentchat.agents import AssistantAgent
+from autogen_agentchat.messages import TextMessage
 from autogen_core.models import ChatCompletionClient, UserMessage
 from autogen_core.tools import BaseTool
-from pydantic import BaseModel, Field
-from weaviate import WeaviateClient
+from typing_extensions import override
 
 from autogenstudio.services.weaviate_service import WeaviateService
-
-
-class ClarificationAgentResponse(BaseModel):
-    """Output model for the agent."""
-
-    questions: list[str] = Field(..., description="List of questions to ask the user.")
-    is_clarification_needed: bool = Field(
-        ..., description="Flag indicating if clarification is needed."
-    )
 
 
 class ClarificationAgent(AssistantAgent):
@@ -33,13 +22,13 @@ class ClarificationAgent(AssistantAgent):
         self.kb_collection = kb_collection_name
 
         super().__init__(
-            name="ClarificationAgent",
+            name="clarify",
             description="Clarification agent that asks clarifying questions to the user.",
             system_message=system_prompt,
             model_client=model_client,
-            model_client_stream=True,
-            output_content_type=ClarificationAgentResponse,
+            model_client_stream=False,
             tools=tools,
+            handoffs=["user_proxy", "planner"],
         )
 
     @override
@@ -56,7 +45,9 @@ class ClarificationAgent(AssistantAgent):
         query = await self._model_client.create(
             [
                 UserMessage(
-                    content=weaviate_query_prompt.format(user_content=message.content),
+                    content=weaviate_query_prompt.format(
+                        user_content=message.to_model_text()
+                    ),
                     type="UserMessage",
                     source=message.source,
                 )
@@ -80,10 +71,9 @@ class ClarificationAgent(AssistantAgent):
 
             messages[-1] = TextMessage(
                 source=messages[-1].source,
-                content=context_message + messages[-1].content,
+                content=context_message + messages[-1].to_model_text(),
                 metadata=messages[-1].metadata,
             )
-        print(messages[-1])
         return await super().on_messages(messages, cancellation_token)
 
     @override
@@ -92,7 +82,7 @@ class ClarificationAgent(AssistantAgent):
         if not self.kb_collection or len(messages) < 1:
             pass
         else:
-            # the mose recent user message
+            # the most recent user message
             message = messages[-1]
             kb_context = None
 
@@ -100,9 +90,8 @@ class ClarificationAgent(AssistantAgent):
                 [
                     UserMessage(
                         content=weaviate_query_prompt.format(
-                            user_content=message.content
+                            user_content=message.to_model_text()
                         ),
-                        type="UserMessage",
                         source=message.source,
                     )
                 ],
@@ -123,57 +112,55 @@ class ClarificationAgent(AssistantAgent):
                 context_message = f"[Knoledge Base Context]\n{kb_context}\n\n"
                 messages = list(messages)
 
-                messages[-1] = TextMessage(
-                    source=messages[-1].source,
-                    content=context_message + messages[-1].content,
-                    metadata=messages[-1].metadata,
+                messages.append(
+                    TextMessage(
+                        source=messages[-1].source,
+                        content=context_message + messages[-1].to_model_text(),
+                        metadata=messages[-1].metadata,
+                    )
                 )
+        print("running clarification agent")
 
         async for msg in super().on_messages_stream(messages, cancellation_token):
             yield msg
 
 
-weaviate_query_prompt = """
-user content:
+weaviate_query_prompt = """user content:
 {user_content}
 
 write a query for weaviate to get the most relevant context for the user content.
-the response should only have the query string, and nothing else.
-"""
+the response should only have the query string, and nothing else."""
 
 
-system_prompt = """# Clarification Agent System Prompt
+system_prompt = """Clarification Agent Prompt
+You ensure user requests are clear and complete before they are processed. Focus on workflow structure, data flow, and functional goals, not code or implementation details.
 
-You are a Clarification Agent that identifies ambiguities or missing information in user requests before they're processed by other agents.
+Your Role
+Spot vague terms, missing steps, or unclear goals
 
-## Core Functions
-- Analyze all provided context to identify vague terms, ambiguities, or missing details
-- Ask targeted questions to resolve unclear points
-- Validate understanding of key requirements
-- Ensure the request is sufficiently clear for downstream processing
+Ask brief, targeted questions to clarify pipeline intent, inputs/outputs, or expected behavior
 
-## When to Ask Questions
-- When terms could have multiple interpretations
-- When essential parameters are missing
-- When requirements appear contradictory
-- When scope or boundaries are unclear
+Avoid questions about programming languages, frameworks, or algorithms
 
-## When NOT to Ask Questions
-- When information is already clearly stated
-- When details are non-essential for processing
-- When reliable inferences can be made from context
+Ask Questions When:
+Steps or data connections are unclear
 
-## Communication Guidelines
-- Be concise and direct
-- Group related questions to minimize interactions
-- Provide brief context for why clarification is needed
-- Present questions neutrally and professionally
+Inputs, outputs, or expected outcomes are missing
 
-## Process Flow
-1. Analyze input for ambiguities or missing information
-2. If needed, ask clear, targeted questions
-3. If not needed, confirm understanding and prepare for handoff
-4. After clarification, verify completeness and prepare final context
+Terms like “analyze” or “process” are ambiguous
 
-Remember: Your goal is to ensure all inputs are sufficiently clear and detailed to enable optimal performance from subsequent agents in the workflow.
+Don’t Ask When:
+Only implementation details are missing
+If user tells to decide yourself
+
+Non-critical choices should be inferred or deferred
+
+Style
+just return whether the clarification is needed or not, and the questions to ask the user
+
+Focus on making pipeline requests UI-ready — not implementation-ready.
+
+Handoffs
+if you have questions, handoff to user_proxy
+if you have no questions, handoff to planner
 """

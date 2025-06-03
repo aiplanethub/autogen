@@ -1,12 +1,13 @@
 import datetime
-from typing import Optional
+import json
+from typing import Any, List, Optional
 
 from ..database import DatabaseManager
 from ..datamodel import (
-    BuilderSession,
-    BuilderMessage,
     BuilderConfigSelection,
+    BuilderMessage,
     BuilderRole,
+    BuilderSession,
     MessageMeta,
 )
 
@@ -40,6 +41,7 @@ class BuilderService:
                 knowledgebases=[],
                 agents=[],
                 tools=[],
+                gallery_id=None,
             )
             response = self.db.upsert(builder_config_selection, return_json=False)
             # if not response.status:
@@ -48,6 +50,26 @@ class BuilderService:
             print(str(e))
 
         return builder
+
+    def create_message(
+        self,
+        builder_id: int,
+        role: BuilderRole,
+        prompt: str,
+        metadata: MessageMeta,
+    ) -> BuilderMessage | None:
+        builder_message_model = BuilderMessage(
+            builder_session_id=builder_id,
+            role=role,
+            content=prompt,
+            message_meta=json.loads(metadata.model_dump_json()),
+        )
+        message = self.db.upsert(builder_message_model, return_json=False)
+
+        if not message.status:
+            raise Exception(message.message)
+
+        return message.data
 
     def save(
         self,
@@ -122,12 +144,14 @@ class BuilderService:
 
         return session.workflow_config
 
-    def get_config_selection(self, builder_id: int) -> BuilderConfigSelection:
+    def get_config_selection(self, builder_id: int) -> BuilderConfigSelection | None:
         filters = {"builder_session_id": builder_id}
         response = self.db.get(BuilderConfigSelection, filters)
 
         if response.status:
-            print(response.data)
+            if len(response.data) == 0:
+                return None
+
             return response.data[0]
 
         raise Exception(response.message)
@@ -135,13 +159,15 @@ class BuilderService:
     def update_config_selection(
         self,
         builder_id: int,
-        agents: list[str] = [],
-        tools: list[str] = [],
+        agents: List[str] = [],
+        tools: List[str] = [],
         knowledge_bases: list[str] = [],
-        gallery_id: int = None,
+        gallery_id: Optional[int] = None,
     ):
 
         builder_config = self.get_config_selection(builder_id)
+        if not builder_config:
+            builder_config = BuilderConfigSelection(builder_session_id=builder_id)
 
         if agents:
             builder_config.agents = agents
